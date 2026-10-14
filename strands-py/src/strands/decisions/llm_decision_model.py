@@ -8,7 +8,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, ValidationError, create_model
 
 from ..models.bedrock import BedrockModel
 from ..models.model import Model
@@ -84,19 +84,24 @@ class LLMDecisionModel(DecisionModel):
         usage: Usage | None = None
         latency_ms: int | None = None
 
-        async for event in self._model.structured_output(answer_model, messages, system_prompt=system_prompt):
-            chunk = event.get("event")
-            if isinstance(chunk, Mapping) and isinstance(metadata := chunk.get("metadata"), Mapping):
-                if isinstance(reported := metadata.get("usage"), Mapping):
-                    usage = Usage(
-                        inputTokens=reported.get("inputTokens", 0),
-                        outputTokens=reported.get("outputTokens", 0),
-                        totalTokens=reported.get("totalTokens", 0),
-                    )
-                if isinstance(metrics := metadata.get("metrics"), Mapping) and metrics.get("latencyMs") is not None:
-                    latency_ms = metrics["latencyMs"]
-            if "output" in event:
-                output = cast(BaseModel, event["output"])
+        try:
+            async for event in self._model.structured_output(answer_model, messages, system_prompt=system_prompt):
+                chunk = event.get("event")
+                if isinstance(chunk, Mapping) and isinstance(metadata := chunk.get("metadata"), Mapping):
+                    if isinstance(reported := metadata.get("usage"), Mapping):
+                        usage = Usage(
+                            inputTokens=reported.get("inputTokens", 0),
+                            outputTokens=reported.get("outputTokens", 0),
+                            totalTokens=reported.get("totalTokens", 0),
+                        )
+                    if isinstance(metrics := metadata.get("metrics"), Mapping) and metrics.get("latencyMs") is not None:
+                        latency_ms = metrics["latencyMs"]
+                if "output" in event:
+                    output = cast(BaseModel, event["output"])
+        except ValidationError as error:
+            raise StructuredOutputException(f"decision model returned an invalid answer set: {error}") from error
+        except ValueError as error:
+            raise StructuredOutputException("decision model returned no structured answers") from error
 
         if output is None:
             raise StructuredOutputException("decision model returned no structured answers")

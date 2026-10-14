@@ -334,12 +334,25 @@ async def test_returns_a_result_without_usage_when_the_provider_omits_it():
 
 
 @pytest.mark.asyncio
-async def test_throws_when_the_model_returns_an_unknown_option():
+async def test_translates_an_omitted_answer_validation_error():
+    model = RecordingModel({})
+    decision = LLMDecisionModel(model=model)
+
+    with pytest.raises(StructuredOutputException, match="invalid answer set") as raised:
+        await decision.ask("x", {"q": {"question": "bool?", "choices": "boolean"}})
+
+    assert isinstance(raised.value.__cause__, ValidationError)
+
+
+@pytest.mark.asyncio
+async def test_translates_an_unknown_option_validation_error():
     model = RecordingModel({"color": "purple"})
     decision = LLMDecisionModel(model=model)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(StructuredOutputException, match="invalid answer set") as raised:
         await decision.ask("x", {"color": {"question": "c?", "choices": ["red", "green"]}})
+
+    assert isinstance(raised.value.__cause__, ValidationError)
 
 
 def test_rejects_a_non_model_argument():
@@ -375,6 +388,35 @@ async def test_carries_question_ids_that_are_not_valid_python_identifiers():
 
     assert result.answers == {"is it red?": "yes", "model_config": "no"}
     assert _answer_enum(model.calls[0]["output_model"], "is it red?") == ["yes", "no", "uncertain"]
+
+
+@pytest.mark.parametrize("stop_reason", ["end_turn", "max_tokens", "guardrail_intervened"])
+@pytest.mark.asyncio
+async def test_translates_bedrock_non_tool_stop_reasons(monkeypatch, stop_reason):
+    from strands.models.bedrock import BedrockModel
+
+    model = BedrockModel.__new__(BedrockModel)
+
+    async def fake_stream(self, *args, **kwargs):
+        yield {"messageStart": {"role": "assistant"}}
+        yield {"contentBlockDelta": {"delta": {"text": "not a structured answer"}}}
+        yield {"contentBlockStop": {}}
+        yield {"messageStop": {"stopReason": stop_reason}}
+        yield {
+            "metadata": {
+                "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+                "metrics": {"latencyMs": 1},
+            }
+        }
+
+    monkeypatch.setattr(BedrockModel, "stream", fake_stream)
+    decision = LLMDecisionModel(model=model)
+
+    with pytest.raises(StructuredOutputException, match="no structured answers") as raised:
+        await decision.ask("x", {"q": {"question": "ok?", "choices": "boolean"}})
+
+    assert isinstance(raised.value.__cause__, ValueError)
+    assert stop_reason in str(raised.value.__cause__)
 
 
 @pytest.mark.asyncio

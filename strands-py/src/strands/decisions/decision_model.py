@@ -34,10 +34,8 @@ class DecisionModel(abc.ABC):
         Raises:
             ValueError: If ``questions`` is empty or contains an invalid ``question``, ``choices``,
                 or ``uncertainty``.
-            StructuredOutputException: If the model declines to produce a valid answer set (e.g. a
-                non-tool-use response, or an omitted answer). The underlying
-                ``model.structured_output`` may also raise ``pydantic.ValidationError`` when the
-                model returns an option outside a question's allowed choices; it propagates unchanged.
+            StructuredOutputException: If the model declines to produce a valid answer set, omits
+                an answer, or returns a value outside a question's allowed choices.
         """
         _validate_questions(questions)
 
