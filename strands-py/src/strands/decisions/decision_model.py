@@ -6,7 +6,6 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-import opentelemetry.context as context_api
 import opentelemetry.trace as trace_api
 from opentelemetry.trace import SpanKind, StatusCode
 
@@ -48,9 +47,14 @@ class DecisionModel(abc.ABC):
         )
         span.add_event("gen_ai.decision.questions", {"ids": list(questions.keys())})
 
-        token = context_api.attach(trace_api.set_span_in_context(span))
         try:
-            result = await self._ask(state, questions, **kwargs)
+            with trace_api.use_span(
+                span,
+                end_on_exit=False,
+                record_exception=False,
+                set_status_on_exception=False,
+            ):
+                result = await self._ask(state, questions, **kwargs)
 
             attributes: dict[str, Any] = {"gen_ai.decision.latency_ms": result.metadata.latency_ms}
             if result.usage is not None:
@@ -67,7 +71,6 @@ class DecisionModel(abc.ABC):
             span.record_exception(error)
             raise
         finally:
-            context_api.detach(token)
             span.end()
 
     @abc.abstractmethod
