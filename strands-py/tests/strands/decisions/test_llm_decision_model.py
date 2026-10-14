@@ -109,6 +109,18 @@ async def test_falls_back_to_wall_clock_latency_when_provider_omits_latency():
 
 
 @pytest.mark.asyncio
+async def test_falls_back_to_wall_clock_latency_when_provider_reports_zero(monkeypatch):
+    timestamps = iter([10.0, 10.125])
+    monkeypatch.setattr("strands.decisions.llm_decision_model.time.perf_counter", lambda: next(timestamps))
+    model = RecordingModel({"q": "true"}, latency_ms=0)
+    decision = LLMDecisionModel(model=model)
+
+    result = await decision.ask("x", {"q": {"question": "ok?", "choices": "boolean"}})
+
+    assert result.metadata.latency_ms == 125
+
+
+@pytest.mark.asyncio
 async def test_returns_uncertain_when_model_picks_the_uncertain_option():
     model = RecordingModel({"color": "uncertain"})
     decision = LLMDecisionModel(model=model)

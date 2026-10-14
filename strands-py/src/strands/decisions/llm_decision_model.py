@@ -94,8 +94,9 @@ class LLMDecisionModel(DecisionModel):
                             outputTokens=reported.get("outputTokens", 0),
                             totalTokens=reported.get("totalTokens", 0),
                         )
-                    if isinstance(metrics := metadata.get("metrics"), Mapping) and metrics.get("latencyMs") is not None:
-                        latency_ms = metrics["latencyMs"]
+                    usable_latency_ms = _usable_latency_ms(metadata.get("metrics"))
+                    if usable_latency_ms is not None:
+                        latency_ms = usable_latency_ms
                 if "output" in event:
                     output = cast(BaseModel, event["output"])
         except ValidationError as error:
@@ -110,6 +111,16 @@ class LLMDecisionModel(DecisionModel):
 
         answers = _convert_answers(output, questions)
         return DecisionResult(answers=answers, usage=usage, metadata=DecisionMetadata(latency_ms=latency_ms))
+
+
+def _usable_latency_ms(metrics: object) -> int | None:
+    """Return a positive provider latency, ignoring placeholders such as AnthropicModel's ``0``."""
+    if not isinstance(metrics, Mapping):
+        return None
+    latency_ms = metrics.get("latencyMs")
+    if isinstance(latency_ms, bool) or not isinstance(latency_ms, int) or latency_ms <= 0:
+        return None
+    return latency_ms
 
 
 def _answer_literals(question: Question, allow_uncertain: bool) -> list[str]:
