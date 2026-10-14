@@ -82,45 +82,53 @@ class DecisionModel(abc.ABC):
         ...
 
 
+_MISSING = object()
+
+
 def _validate_questions(questions: dict[str, Question]) -> None:
     if not questions:
         raise ValueError("ask requires at least one question")
 
     for question_id, question in questions.items():
-        question_text = question.get("question")
-        if not isinstance(question_text, str) or not question_text.strip():
-            raise ValueError(f"question id=<{question_id}> | question must be a non-empty string")
+        _validate_question_text(question_id, question)
+        _validate_choices(question_id, question)
+        _validate_uncertainty(question_id, question)
 
-        choices = question.get("choices")
-        if choices != "boolean":
-            if not isinstance(choices, list) or len(choices) == 0:
-                raise ValueError(
-                    f"question id=<{question_id}> | choices must be 'boolean' or a non-empty list of strings"
-                )
-            if len(set(choices)) != len(choices):
-                raise ValueError(f"question id=<{question_id}> | choices must be unique")
-            if any(not isinstance(choice, str) or len(choice) == 0 for choice in choices):
-                raise ValueError(f"question id=<{question_id}> | choices must be non-empty strings")
-            if "uncertain" in choices:
-                raise ValueError(
-                    f"question id=<{question_id}> | choice 'uncertain' is reserved for the Uncertain answer"
-                )
 
-        uncertainty = question.get("uncertainty")
-        if uncertainty is not None and not isinstance(uncertainty, bool):
-            if not isinstance(uncertainty, Mapping):
-                raise ValueError(
-                    f"question id=<{question_id}> | uncertainty must be a boolean or {{ min_confidence? }} object"
-                )
-            min_confidence = uncertainty.get("min_confidence")
-            if min_confidence is not None and (
-                isinstance(min_confidence, bool)
-                or not isinstance(min_confidence, (int, float))
-                or not math.isfinite(min_confidence)
-                or min_confidence < 0
-                or min_confidence > 1
-            ):
-                raise ValueError(f"question id=<{question_id}> | uncertainty.min_confidence must be in [0.0, 1.0]")
+def _validate_question_text(question_id: str, question: Question) -> None:
+    question_text = question.get("question")
+    if not isinstance(question_text, str) or not question_text.strip():
+        raise ValueError(f"question id=<{question_id}> | question must be a non-empty string")
+
+
+def _validate_choices(question_id: str, question: Question) -> None:
+    choices = question.get("choices")
+    if choices == "boolean":
+        return
+    if not isinstance(choices, list) or len(choices) == 0:
+        raise ValueError(f"question id=<{question_id}> | choices must be 'boolean' or a non-empty list of strings")
+    if any(not isinstance(choice, str) or len(choice) == 0 for choice in choices):
+        raise ValueError(f"question id=<{question_id}> | choices must be non-empty strings")
+    if len(set(choices)) != len(choices):
+        raise ValueError(f"question id=<{question_id}> | choices must be unique")
+    if "uncertain" in choices:
+        raise ValueError(f"question id=<{question_id}> | choice 'uncertain' is reserved for the Uncertain answer")
+
+
+def _validate_uncertainty(question_id: str, question: Question) -> None:
+    uncertainty = question.get("uncertainty", _MISSING)
+    if uncertainty is _MISSING or isinstance(uncertainty, bool):
+        return
+    if not isinstance(uncertainty, Mapping):
+        raise ValueError(f"question id=<{question_id}> | uncertainty must be a boolean or {{ min_confidence? }} object")
+
+    min_confidence = uncertainty.get("min_confidence", _MISSING)
+    if min_confidence is _MISSING:
+        return
+    if isinstance(min_confidence, bool) or not isinstance(min_confidence, (int, float)):
+        raise ValueError(f"question id=<{question_id}> | uncertainty.min_confidence must be in [0.0, 1.0]")
+    if not math.isfinite(min_confidence) or not 0 <= min_confidence <= 1:
+        raise ValueError(f"question id=<{question_id}> | uncertainty.min_confidence must be in [0.0, 1.0]")
 
 
 def _uncertainty_allowed(question: Question) -> bool:

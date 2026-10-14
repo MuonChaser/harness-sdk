@@ -239,6 +239,40 @@ async def test_rejects_an_uncertainty_value_that_is_neither_boolean_nor_object()
             "x",
             {"q": {"question": "bool?", "choices": "boolean", "uncertainty": "false"}},  # type: ignore[typeddict-item]
         )
+    with pytest.raises(ValueError, match="uncertainty must be a boolean or"):
+        await decision.ask(
+            "x",
+            {"q": {"question": "bool?", "choices": "boolean", "uncertainty": None}},  # type: ignore[typeddict-item]
+        )
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_accepts_an_uncertainty_object_without_min_confidence():
+    model = RecordingModel({"q": "uncertain"})
+    decision = LLMDecisionModel(model=model)
+
+    result = await decision.ask("x", {"q": {"question": "bool?", "choices": "boolean", "uncertainty": {}}})
+
+    assert isinstance(result.answers["q"], Uncertain)
+
+
+@pytest.mark.asyncio
+async def test_rejects_none_min_confidence():
+    model = RecordingModel({})
+    decision = LLMDecisionModel(model=model)
+
+    with pytest.raises(ValueError, match=r"uncertainty.min_confidence must be in \[0.0, 1.0\]"):
+        await decision.ask(
+            "x",
+            {
+                "q": {
+                    "question": "bool?",
+                    "choices": "boolean",
+                    "uncertainty": {"min_confidence": None},  # type: ignore[typeddict-item]
+                }
+            },
+        )
     assert model.calls == []
 
 
@@ -261,6 +295,19 @@ async def test_rejects_a_choice_literally_named_uncertain():
 
     with pytest.raises(ValueError, match="reserved for the Uncertain answer"):
         await decision.ask("x", {"q": {"question": "pick", "choices": ["certain", "uncertain"]}})
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rejects_unhashable_choice_values_with_a_validation_error():
+    model = RecordingModel({})
+    decision = LLMDecisionModel(model=model)
+
+    with pytest.raises(ValueError, match="choices must be non-empty strings"):
+        await decision.ask(
+            "x",
+            {"q": {"question": "pick", "choices": [["nested"]]}},  # type: ignore[list-item]
+        )
     assert model.calls == []
 
 
