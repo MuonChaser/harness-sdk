@@ -20,14 +20,13 @@ class DecisionModel(abc.ABC):
     span. Every implementation is traced identically.
     """
 
-    async def ask(self, state: DecisionInput, questions: dict[str, Question], **kwargs: Any) -> DecisionResult:
+    async def ask(self, state: DecisionInput, questions: dict[str, Question]) -> DecisionResult:
         """Ask one or more closed questions over the given state.
 
         Args:
             state: A plain string, a one-shot content list, or a message history.
             questions: Map of identifier to question. The returned ``answers`` dict is keyed off
                 this same map.
-            **kwargs: Additional keyword arguments for future extensibility, forwarded to ``_ask``.
 
         Returns:
             A ``DecisionResult`` whose answers are keyed by the question identifiers.
@@ -54,7 +53,7 @@ class DecisionModel(abc.ABC):
                 record_exception=False,
                 set_status_on_exception=False,
             ):
-                result = await self._ask(state, questions, **kwargs)
+                result = await self._ask(state, questions)
 
             attributes: dict[str, Any] = {"gen_ai.decision.latency_ms": result.metadata.latency_ms}
             if result.usage is not None:
@@ -74,7 +73,7 @@ class DecisionModel(abc.ABC):
             span.end()
 
     @abc.abstractmethod
-    async def _ask(self, state: DecisionInput, questions: dict[str, Question], **kwargs: Any) -> DecisionResult:
+    async def _ask(self, state: DecisionInput, questions: dict[str, Question]) -> DecisionResult:
         """Implementation-specific decision logic.
 
         Must return a complete ``DecisionResult``, including ``metadata.latency_ms`` sourced from

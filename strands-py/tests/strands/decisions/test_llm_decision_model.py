@@ -208,6 +208,20 @@ async def test_throws_when_the_model_returns_no_structured_answers():
 
 
 @pytest.mark.asyncio
+async def test_rejects_an_unexpected_ask_keyword_argument():
+    model = RecordingModel({"q": "true"})
+    decision = LLMDecisionModel(model=model)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        await decision.ask(
+            "x",
+            {"q": {"question": "ok?", "choices": "boolean"}},
+            temperature=0.2,  # type: ignore[call-arg]
+        )
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
 async def test_rejects_an_empty_question_map_before_calling_the_model():
     model = RecordingModel({})
     decision = LLMDecisionModel(model=model)

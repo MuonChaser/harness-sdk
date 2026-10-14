@@ -74,7 +74,7 @@ class LLMDecisionModel(DecisionModel):
         self._model = resolved_model
         self._system_prompt = system_prompt
 
-    async def _ask(self, state: DecisionInput, questions: dict[str, Question], **kwargs: Any) -> DecisionResult:
+    async def _ask(self, state: DecisionInput, questions: dict[str, Question]) -> DecisionResult:
         answer_model = _build_answer_model(questions)
         messages = _build_messages(state)
         system_prompt = _build_system_prompt(self._system_prompt)
