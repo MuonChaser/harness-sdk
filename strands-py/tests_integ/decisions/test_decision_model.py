@@ -4,6 +4,7 @@ import pytest
 
 from strands import LLMDecisionModel, Uncertain
 from strands.models import BedrockModel
+from tests_integ.conftest import retry_on_flaky
 
 _HAIKU_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
@@ -12,7 +13,7 @@ def _bedrock_decision_model() -> LLMDecisionModel:
     return LLMDecisionModel(model=BedrockModel(model_id=_HAIKU_MODEL_ID, max_tokens=512))
 
 
-@retry_on_flaky("non-deterministic LLM answer", retry_on=[AssertionError])
+@retry_on_flaky("non-deterministic LLM answer", max_attempts=2, retry_on=[AssertionError])
 @pytest.mark.asyncio
 async def test_answers_each_question_with_the_typed_value_and_reports_usage_and_latency():
     decision = _bedrock_decision_model()
@@ -33,6 +34,7 @@ async def test_answers_each_question_with_the_typed_value_and_reports_usage_and_
     assert result.metadata.latency_ms > 0
 
 
+@retry_on_flaky("non-deterministic LLM answer", max_attempts=2, retry_on=[AssertionError])
 @pytest.mark.asyncio
 async def test_returns_uncertain_with_a_reason_when_the_state_cannot_answer_the_question():
     decision = _bedrock_decision_model()

@@ -1,4 +1,5 @@
 import functools
+import inspect
 import json
 import logging
 import os
@@ -6,7 +7,7 @@ from collections.abc import Callable, Sequence
 
 import boto3
 import pytest
-from tenacity import RetryCallState, RetryError, Retrying, stop_after_attempt, wait_exponential
+from tenacity import AsyncRetrying, RetryCallState, RetryError, Retrying, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -107,16 +108,34 @@ def retry_on_flaky(
     """
 
     def decorator(func: Callable) -> Callable:
+        def should_retry(retry_state: RetryCallState) -> bool:
+            if retry_state.outcome is None or not retry_state.outcome.failed:
+                return False
+            exc = retry_state.outcome.exception()
+            if exc is None:
+                return False
+            return _should_retry_exception(exc, retry_on)
+
+        if inspect.iscoroutinefunction(func):
+
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                try:
+                    async for attempt in AsyncRetrying(
+                        stop=stop_after_attempt(max_attempts),
+                        wait=wait_exponential(multiplier=wait_multiplier, max=wait_max),
+                        retry=should_retry,
+                        reraise=True,
+                    ):
+                        with attempt:
+                            return await func(*args, **kwargs)
+                except RetryError:
+                    raise
+
+            return async_wrapper
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            def should_retry(retry_state: RetryCallState) -> bool:
-                if retry_state.outcome is None or not retry_state.outcome.failed:
-                    return False
-                exc = retry_state.outcome.exception()
-                if exc is None:
-                    return False
-                return _should_retry_exception(exc, retry_on)
-
             try:
                 for attempt in Retrying(
                     stop=stop_after_attempt(max_attempts),
