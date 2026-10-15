@@ -12,6 +12,7 @@ def _bedrock_decision_model() -> LLMDecisionModel:
     return LLMDecisionModel(model=BedrockModel(model_id=_HAIKU_MODEL_ID, max_tokens=512))
 
 
+@retry_on_flaky("non-deterministic LLM answer", retry_on=[AssertionError])
 @pytest.mark.asyncio
 async def test_answers_each_question_with_the_typed_value_and_reports_usage_and_latency():
     decision = _bedrock_decision_model()
