@@ -8,12 +8,14 @@ from opentelemetry import trace as trace_api
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 from pydantic import BaseModel
 
 from strands.decisions import LLMDecisionModel
 from strands.models.model import Model
 from strands.types.content import Messages
 from strands.types.event_loop import Usage
+from strands.types.exceptions import StructuredOutputException
 
 DEFAULT_USAGE: Usage = {"inputTokens": 3, "outputTokens": 2, "totalTokens": 5}
 
@@ -21,8 +23,9 @@ DEFAULT_USAGE: Usage = {"inputTokens": 3, "outputTokens": 2, "totalTokens": 5}
 class _OutputModel(Model):
     """A model whose ``structured_output`` optionally opens a child span before yielding the output."""
 
-    def __init__(self, *, child_span: bool = False) -> None:
+    def __init__(self, *, child_span: bool = False, answer: str = "true") -> None:
         self.child_span = child_span
+        self.answer = answer
 
     def get_config(self) -> Any:
         return {}
@@ -37,7 +40,7 @@ class _OutputModel(Model):
             child = trace_api.get_tracer("test").start_span("child_in_ask")
             child.end()
         yield {"event": {"metadata": {"usage": DEFAULT_USAGE, "metrics": {"latencyMs": 1}}}}
-        yield {"output": output_model(**{"q": {"answer": "true"}})}
+        yield {"output": output_model(**{"q": {"answer": self.answer}})}
 
     async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         raise NotImplementedError
@@ -85,7 +88,7 @@ async def test_parents_child_spans_created_inside_ask_under_the_decision_span(ex
 
 
 @pytest.mark.asyncio
-async def test_runs_when_there_is_no_active_parent_span(exporter):
+async def test_records_successful_decision_span_without_active_parent(exporter):
     decision = LLMDecisionModel(model=_OutputModel())
 
     await decision.ask("x", {"q": {"question": "ok?", "choices": "boolean"}})
@@ -93,3 +96,38 @@ async def test_runs_when_there_is_no_active_parent_span(exporter):
     spans = exporter.get_finished_spans()
     decision_span = next(span for span in spans if span.name == "decision")
     assert decision_span.parent is None
+    assert dict(decision_span.attributes or {}) == {
+        "gen_ai.operation.name": "decision",
+        "gen_ai.decision.latency_ms": 1,
+        "gen_ai.usage.input_tokens": 3,
+        "gen_ai.usage.output_tokens": 2,
+    }
+    assert decision_span.status.status_code == StatusCode.OK
+
+    events = {event.name: event for event in decision_span.events}
+    assert list(events) == ["gen_ai.decision.questions", "gen_ai.decision.answers"]
+    assert dict(events["gen_ai.decision.questions"].attributes or {}) == {"ids": ("q",)}
+    assert dict(events["gen_ai.decision.answers"].attributes or {}) == {"answers": '{"q": true}'}
+
+
+@pytest.mark.asyncio
+async def test_records_error_status_and_exception_event(exporter):
+    decision = LLMDecisionModel(model=_OutputModel(answer="not-an-option"))
+
+    with pytest.raises(StructuredOutputException, match="decision model returned an invalid answer set"):
+        await decision.ask("x", {"q": {"question": "ok?", "choices": "boolean"}})
+
+    spans = exporter.get_finished_spans()
+    decision_span = next(span for span in spans if span.name == "decision")
+    assert decision_span.status.status_code == StatusCode.ERROR
+    assert decision_span.status.description is not None
+    assert decision_span.status.description.startswith("decision model returned an invalid answer set")
+
+    events = {event.name: event for event in decision_span.events}
+    assert list(events) == ["gen_ai.decision.questions", "exception"]
+    assert dict(events["gen_ai.decision.questions"].attributes or {}) == {"ids": ("q",)}
+
+    exception_attributes = dict(events["exception"].attributes or {})
+    assert str(exception_attributes["exception.type"]).endswith(".StructuredOutputException")
+    assert str(exception_attributes["exception.message"]).startswith("decision model returned an invalid answer set")
+    assert exception_attributes["exception.stacktrace"]
