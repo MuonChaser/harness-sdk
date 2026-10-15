@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 
 from strands.decisions import LLMDecisionModel, Uncertain
 from strands.models.model import Model
+from strands.tools.structured_output.structured_output_utils import convert_pydantic_to_tool_spec
 from strands.types.content import Messages
 from strands.types.event_loop import Usage
 from strands.types.exceptions import StructuredOutputException
@@ -96,6 +97,26 @@ async def test_narrows_string_and_bool_answers_from_a_successful_call():
     assert result.answers["is_fruit"] is True
     assert result.usage == DEFAULT_USAGE
     assert result.metadata.latency_ms == 42
+
+
+@pytest.mark.asyncio
+async def test_question_ids_do_not_collide_with_internal_field_names():
+    model = RecordingModel({"q0": "true", "q1": "sports"})
+    decision = LLMDecisionModel(model=model)
+
+    result = await decision.ask(
+        "English text about sports",
+        {
+            "q0": {"question": "Is the text in English?", "choices": "boolean"},
+            "q1": {"question": "Which topic?", "choices": ["sports", "politics"]},
+        },
+    )
+
+    schema = convert_pydantic_to_tool_spec(model.calls[0]["output_model"])["inputSchema"]["json"]
+    assert schema["properties"]["q0"]["properties"]["answer"]["enum"] == ["true", "false", "uncertain"]
+    assert schema["properties"]["q1"]["properties"]["answer"]["enum"] == ["sports", "politics", "uncertain"]
+    assert schema["required"] == ["q0", "q1"]
+    assert result.answers == {"q0": True, "q1": "sports"}
 
 
 @pytest.mark.asyncio

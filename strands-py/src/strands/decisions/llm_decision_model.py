@@ -139,21 +139,27 @@ def _build_answer_model(questions: dict[str, Question]) -> type[BaseModel]:
             ),
         )
         per_question_model.__doc__ = question["question"]
-        fields[_field_name(index)] = (per_question_model, Field(alias=question_id, description=question["question"]))
+        fields[_field_name(index, questions)] = (
+            per_question_model,
+            Field(alias=question_id, description=question["question"]),
+        )
 
     model = create_model("DecisionAnswers", **fields)
     model.__doc__ = "Answer for each question in the input decision set."
     return cast(type[BaseModel], model)
 
 
-def _field_name(index: int) -> str:
-    return f"q{index}"
+def _field_name(index: int, questions: dict[str, Question]) -> str:
+    name = f"q{index}"
+    while name in questions:
+        name += "_"
+    return name
 
 
 def _convert_answers(output: BaseModel, questions: dict[str, Question]) -> dict[str, bool | str | Uncertain]:
     answers: dict[str, bool | str | Uncertain] = {}
     for index, (question_id, question) in enumerate(questions.items()):
-        entry = getattr(output, _field_name(index), None)
+        entry = getattr(output, _field_name(index, questions), None)
         if entry is None:
             raise StructuredOutputException(f"decision model omitted answer for question id=<{question_id}>")
         answers[question_id] = _convert_single_answer(question, entry.answer, entry.reason)
