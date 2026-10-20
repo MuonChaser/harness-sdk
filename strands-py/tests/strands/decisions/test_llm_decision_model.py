@@ -21,7 +21,8 @@ class RecordingModel(Model):
 
     ``raw`` entries may be bare strings (shorthand for ``{"answer": ...}``) or full
     ``{"answer", "reason"?}`` mappings. Set ``emit_output=False`` to simulate a model that produces
-    no structured answers. ``usage``/``latency_ms`` of ``None`` suppress that metadata.
+    no structured answers, or ``error`` to simulate a provider failure. ``usage``/``latency_ms`` of
+    ``None`` suppress that metadata.
     """
 
     def __init__(
@@ -31,11 +32,13 @@ class RecordingModel(Model):
         usage: Usage | None = DEFAULT_USAGE,
         latency_ms: int | None = 42,
         emit_output: bool = True,
+        error: ValueError | None = None,
     ) -> None:
         self.raw = raw
         self.usage = usage
         self.latency_ms = latency_ms
         self.emit_output = emit_output
+        self.error = error
         self.calls: list[dict[str, Any]] = []
 
     def get_config(self) -> Any:
@@ -48,6 +51,9 @@ class RecordingModel(Model):
         self, output_model: type[BaseModel], prompt: Messages, system_prompt: str | None = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
         self.calls.append({"output_model": output_model, "prompt": prompt, "system_prompt": system_prompt})
+
+        if self.error is not None:
+            raise self.error
 
         metadata: dict[str, Any] = {}
         if self.usage is not None:
@@ -238,6 +244,26 @@ async def test_throws_when_the_model_returns_no_structured_answers():
 
     with pytest.raises(StructuredOutputException, match="no structured answers"):
         await decision.ask("x", {"q": {"question": "bool?", "choices": "boolean"}})
+
+
+@pytest.mark.parametrize(
+    "provider_error",
+    [
+        "Failed to parse or load content into model: schema validation failed",
+        "Failed to parse tool call arguments into model: schema validation failed",
+    ],
+)
+@pytest.mark.asyncio
+async def test_preserves_provider_schema_failure_details(provider_error):
+    error = ValueError(provider_error)
+    model = RecordingModel({}, error=error)
+    decision = LLMDecisionModel(model=model)
+
+    with pytest.raises(StructuredOutputException) as raised:
+        await decision.ask("x", {"q": {"question": "bool?", "choices": "boolean"}})
+
+    assert str(raised.value) == f"decision model returned no structured answers: {provider_error}"
+    assert raised.value.__cause__ is error
 
 
 @pytest.mark.asyncio

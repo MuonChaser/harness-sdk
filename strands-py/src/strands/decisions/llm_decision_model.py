@@ -101,7 +101,7 @@ class LLMDecisionModel(DecisionModel):
         except ValidationError as error:
             raise StructuredOutputException(f"decision model returned an invalid answer set: {error}") from error
         except ValueError as error:
-            raise StructuredOutputException("decision model returned no structured answers") from error
+            raise StructuredOutputException(f"decision model returned no structured answers: {error}") from error
 
         if output is None:
             raise StructuredOutputException("decision model returned no structured answers")
