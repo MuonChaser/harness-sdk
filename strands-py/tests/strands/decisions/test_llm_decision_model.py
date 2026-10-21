@@ -6,7 +6,15 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from strands.decisions import LLMDecisionModel, Uncertain
+from strands.decisions import (
+    DecisionInput,
+    DecisionMetadata,
+    DecisionModel,
+    DecisionResult,
+    LLMDecisionModel,
+    Question,
+    Uncertain,
+)
 from strands.models.model import Model
 from strands.tools.structured_output.structured_output_utils import convert_pydantic_to_tool_spec
 from strands.types.content import Messages
@@ -74,6 +82,20 @@ class RecordingModel(Model):
         yield  # pragma: no cover
 
 
+class RecordingDecisionModel(DecisionModel):
+    """A decision model that records implementation-specific keyword arguments."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict[str, Any] = {}
+
+    async def _ask(self, state: DecisionInput, questions: dict[str, Question], **kwargs: Any) -> DecisionResult:
+        self.kwargs = kwargs
+        return DecisionResult(
+            answers={question_id: True for question_id in questions},
+            metadata=DecisionMetadata(latency_ms=0),
+        )
+
+
 def _answer_enum(output_model: type[BaseModel], question_id: str) -> list[str]:
     """Pull the enum of allowed values for a question from the built answer model's JSON schema.
 
@@ -83,6 +105,17 @@ def _answer_enum(output_model: type[BaseModel], question_id: str) -> list[str]:
     ref = schema["properties"][question_id]["$ref"]
     per_question = schema["$defs"][ref.rsplit("/", 1)[-1]]
     return per_question["properties"]["answer"]["enum"]
+
+
+@pytest.mark.asyncio
+async def test_forwards_additional_keyword_arguments_to_the_implementation():
+    decision = RecordingDecisionModel()
+    questions: dict[str, Question] = {"q": {"question": "ok?", "choices": "boolean"}}
+
+    result = await decision.ask("x", questions, future_option="value")
+
+    assert decision.kwargs == {"future_option": "value"}
+    assert result.answers == {"q": True}
 
 
 @pytest.mark.asyncio
@@ -277,32 +310,12 @@ async def test_rejects_an_empty_question_map_before_calling_the_model():
 
 
 @pytest.mark.asyncio
-async def test_rejects_a_missing_or_empty_question_text():
+async def test_rejects_empty_question_text():
     model = RecordingModel({})
     decision = LLMDecisionModel(model=model)
 
     with pytest.raises(ValueError, match="question must be a non-empty string"):
         await decision.ask("x", {"q": {"question": "   ", "choices": "boolean"}})
-    with pytest.raises(ValueError, match="question must be a non-empty string"):
-        await decision.ask("x", {"q": {"choices": "boolean"}})  # type: ignore[typeddict-item]
-    assert model.calls == []
-
-
-@pytest.mark.asyncio
-async def test_rejects_an_uncertainty_value_that_is_neither_boolean_nor_object():
-    model = RecordingModel({})
-    decision = LLMDecisionModel(model=model)
-
-    with pytest.raises(ValueError, match="uncertainty must be a boolean or"):
-        await decision.ask(
-            "x",
-            {"q": {"question": "bool?", "choices": "boolean", "uncertainty": "false"}},  # type: ignore[typeddict-item]
-        )
-    with pytest.raises(ValueError, match="uncertainty must be a boolean or"):
-        await decision.ask(
-            "x",
-            {"q": {"question": "bool?", "choices": "boolean", "uncertainty": None}},  # type: ignore[typeddict-item]
-        )
     assert model.calls == []
 
 
@@ -316,8 +329,9 @@ async def test_accepts_an_uncertainty_object_without_min_confidence():
     assert isinstance(result.answers["q"], Uncertain)
 
 
+@pytest.mark.parametrize("min_confidence", [-0.1, 1.1, float("nan"), float("inf")])
 @pytest.mark.asyncio
-async def test_rejects_none_min_confidence():
+async def test_rejects_out_of_range_or_non_finite_min_confidence(min_confidence):
     model = RecordingModel({})
     decision = LLMDecisionModel(model=model)
 
@@ -328,21 +342,9 @@ async def test_rejects_none_min_confidence():
                 "q": {
                     "question": "bool?",
                     "choices": "boolean",
-                    "uncertainty": {"min_confidence": None},  # type: ignore[typeddict-item]
+                    "uncertainty": {"min_confidence": min_confidence},
                 }
             },
-        )
-    assert model.calls == []
-
-
-@pytest.mark.asyncio
-async def test_rejects_out_of_range_min_confidence():
-    model = RecordingModel({})
-    decision = LLMDecisionModel(model=model)
-
-    with pytest.raises(ValueError, match=r"uncertainty.min_confidence must be in \[0.0, 1.0\]"):
-        await decision.ask(
-            "x", {"q": {"question": "bool?", "choices": "boolean", "uncertainty": {"min_confidence": 1.5}}}
         )
     assert model.calls == []
 
@@ -358,15 +360,22 @@ async def test_rejects_a_choice_literally_named_uncertain():
 
 
 @pytest.mark.asyncio
-async def test_rejects_unhashable_choice_values_with_a_validation_error():
+async def test_rejects_an_empty_choice_list():
+    model = RecordingModel({})
+    decision = LLMDecisionModel(model=model)
+
+    with pytest.raises(ValueError, match="choices must be a non-empty list of strings"):
+        await decision.ask("x", {"q": {"question": "pick", "choices": []}})
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rejects_an_empty_choice_value():
     model = RecordingModel({})
     decision = LLMDecisionModel(model=model)
 
     with pytest.raises(ValueError, match="choices must be non-empty strings"):
-        await decision.ask(
-            "x",
-            {"q": {"question": "pick", "choices": [["nested"]]}},  # type: ignore[list-item]
-        )
+        await decision.ask("x", {"q": {"question": "pick", "choices": [""]}})
     assert model.calls == []
 
 

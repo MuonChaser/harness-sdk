@@ -15,7 +15,7 @@ from ..models.model import Model
 from ..types.content import ContentBlock, Message, Messages
 from ..types.event_loop import Usage
 from ..types.exceptions import StructuredOutputException
-from .decision_model import DecisionModel, _uncertainty_allowed
+from .decision_model import DecisionModel
 from .types import DecisionInput, DecisionMetadata, DecisionResult, Question, Uncertain
 
 # Reserved option value used to signal uncertainty on the wire.
@@ -74,7 +74,7 @@ class LLMDecisionModel(DecisionModel):
         self._model = resolved_model
         self._system_prompt = system_prompt
 
-    async def _ask(self, state: DecisionInput, questions: dict[str, Question]) -> DecisionResult:
+    async def _ask(self, state: DecisionInput, questions: dict[str, Question], **kwargs: Any) -> DecisionResult:
         answer_model = _build_answer_model(questions)
         messages = _build_messages(state)
         system_prompt = _build_system_prompt(self._system_prompt)
@@ -128,7 +128,8 @@ def _build_answer_model(questions: dict[str, Question]) -> type[BaseModel]:
     """
     fields: dict[str, Any] = {}
     for index, (question_id, question) in enumerate(questions.items()):
-        literals = _answer_literals(question, _uncertainty_allowed(question))
+        # Only an explicit False disables the default uncertain answer.
+        literals = _answer_literals(question, question.get("uncertainty") is not False)
         answer_type: Any = Literal[tuple(literals)]
         per_question_model = create_model(
             f"Answer{index}",

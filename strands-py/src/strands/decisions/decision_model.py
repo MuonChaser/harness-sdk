@@ -3,7 +3,6 @@
 import abc
 import json
 import math
-from collections.abc import Mapping
 from typing import Any
 
 import opentelemetry.trace as trace_api
@@ -20,20 +19,21 @@ class DecisionModel(abc.ABC):
     span. Every implementation is traced identically.
     """
 
-    async def ask(self, state: DecisionInput, questions: dict[str, Question]) -> DecisionResult:
+    async def ask(self, state: DecisionInput, questions: dict[str, Question], **kwargs: Any) -> DecisionResult:
         """Ask one or more closed questions over the given state.
 
         Args:
             state: A plain string, a one-shot content list, or a message history.
             questions: Map of identifier to question. The returned ``answers`` dict is keyed off
                 this same map.
+            **kwargs: Additional keyword arguments forwarded to the implementation for future
+                extensibility.
 
         Returns:
             A ``DecisionResult`` whose answers are keyed by the question identifiers.
 
         Raises:
-            ValueError: If ``questions`` is empty or contains an invalid ``question``, ``choices``,
-                or ``uncertainty``.
+            ValueError: If ``questions`` is empty or a question violates its semantic constraints.
             StructuredOutputException: If the model declines to produce a valid answer set, omits
                 an answer, or returns a value outside a question's allowed choices.
         """
@@ -51,7 +51,7 @@ class DecisionModel(abc.ABC):
                 record_exception=False,
                 set_status_on_exception=False,
             ):
-                result = await self._ask(state, questions)
+                result = await self._ask(state, questions, **kwargs)
 
             attributes: dict[str, Any] = {"gen_ai.decision.latency_ms": result.metadata.latency_ms}
             if result.usage is not None:
@@ -71,16 +71,14 @@ class DecisionModel(abc.ABC):
             span.end()
 
     @abc.abstractmethod
-    async def _ask(self, state: DecisionInput, questions: dict[str, Question]) -> DecisionResult:
+    async def _ask(self, state: DecisionInput, questions: dict[str, Question], **kwargs: Any) -> DecisionResult:
         """Implementation-specific decision logic.
 
-        Must return a complete ``DecisionResult``, including ``metadata.latency_ms`` sourced from
-        the underlying model provider.
+        Additional keyword arguments support implementation-specific options and future interface
+        extensions. Must return a complete ``DecisionResult``, including ``metadata.latency_ms``
+        sourced from the underlying model provider.
         """
         ...
-
-
-_MISSING = object()
 
 
 def _validate_questions(questions: dict[str, Question]) -> None:
@@ -94,18 +92,17 @@ def _validate_questions(questions: dict[str, Question]) -> None:
 
 
 def _validate_question_text(question_id: str, question: Question) -> None:
-    question_text = question.get("question")
-    if not isinstance(question_text, str) or not question_text.strip():
+    if not question["question"].strip():
         raise ValueError(f"question id=<{question_id}> | question must be a non-empty string")
 
 
 def _validate_choices(question_id: str, question: Question) -> None:
-    choices = question.get("choices")
+    choices = question["choices"]
     if choices == "boolean":
         return
-    if not isinstance(choices, list) or len(choices) == 0:
-        raise ValueError(f"question id=<{question_id}> | choices must be 'boolean' or a non-empty list of strings")
-    if any(not isinstance(choice, str) or len(choice) == 0 for choice in choices):
+    if not choices:
+        raise ValueError(f"question id=<{question_id}> | choices must be a non-empty list of strings")
+    if any(not choice for choice in choices):
         raise ValueError(f"question id=<{question_id}> | choices must be non-empty strings")
     if len(set(choices)) != len(choices):
         raise ValueError(f"question id=<{question_id}> | choices must be unique")
@@ -114,27 +111,13 @@ def _validate_choices(question_id: str, question: Question) -> None:
 
 
 def _validate_uncertainty(question_id: str, question: Question) -> None:
-    uncertainty = question.get("uncertainty", _MISSING)
-    if uncertainty is _MISSING or isinstance(uncertainty, bool):
+    uncertainty = question.get("uncertainty")
+    if not isinstance(uncertainty, dict) or "min_confidence" not in uncertainty:
         return
-    if not isinstance(uncertainty, Mapping):
-        raise ValueError(f"question id=<{question_id}> | uncertainty must be a boolean or {{ min_confidence? }} object")
 
-    min_confidence = uncertainty.get("min_confidence", _MISSING)
-    if min_confidence is _MISSING:
-        return
-    if isinstance(min_confidence, bool) or not isinstance(min_confidence, (int, float)):
-        raise ValueError(f"question id=<{question_id}> | uncertainty.min_confidence must be in [0.0, 1.0]")
+    min_confidence = uncertainty["min_confidence"]
     if not math.isfinite(min_confidence) or not 0 <= min_confidence <= 1:
         raise ValueError(f"question id=<{question_id}> | uncertainty.min_confidence must be in [0.0, 1.0]")
-
-
-def _uncertainty_allowed(question: Question) -> bool:
-    """Resolve whether ``Uncertain`` is permitted for a question, given its ``uncertainty`` config.
-
-    Shared by every decision-model implementation in this package.
-    """
-    return question.get("uncertainty") is not False
 
 
 def _serialize_answers(answers: dict[str, bool | str | Uncertain]) -> str:
