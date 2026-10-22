@@ -1,0 +1,35 @@
+
+> docs@1.0.0 test:browser
+> node --test test/reading-progress.browser.mjs
+
+TAP version 13
+# {"label":"light-390x844","state":"visible","headerBottom":60,"progressTop":60,"scale":0,"theme":"light"}
+# {"label":"light-390x844","state":"down","headerBottom":0,"progressTop":60,"scale":0.0844707,"theme":"light"}
+# Subtest: reading progress follows the visible header edge on the real blog route
+not ok 1 - reading progress follows the visible header edge on the real blog route
+  ---
+  duration_ms: 3331.239313
+  type: 'test'
+  location: '<checkout>/site/test/reading-progress.browser.mjs:12:1'
+  failureType: 'testCodeFailure'
+  error: 'light-390x844 down: {"headerBottom":0,"progressTop":60,"scale":0.0844707,"theme":"light"}'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    checkEdge (file://<checkout>/site/test/reading-progress.browser.mjs:55:20)
+    async TestContext.<anonymous> (file://<checkout>/site/test/reading-progress.browser.mjs:71:22)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3698.671528

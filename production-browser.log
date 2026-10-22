@@ -1,0 +1,68 @@
+
+> docs@1.0.0 test:browser
+> node --test test/reading-progress.browser.mjs
+
+TAP version 13
+# {"label":"light-390x844","state":"visible","headerBottom":60,"progressTop":60,"scale":0,"theme":"light"}
+# {"label":"light-390x844","state":"down","headerBottom":0,"progressTop":0,"scale":0.0844707,"theme":"light"}
+# {"label":"light-390x844","state":"reverse","headerBottom":60,"progressTop":60,"scale":0.0706316,"theme":"light"}
+# {"label":"light-390x844","state":"hidden-before-resize","headerBottom":0,"progressTop":0,"scale":0.0913903,"theme":"light"}
+# {"label":"light-390x844","state":"resized-desktop","headerBottom":84,"progressTop":84,"scale":0.175156,"theme":"light"}
+# {"label":"light-390x844","state":"resized-compact","headerBottom":60,"progressTop":60,"scale":0.0913903,"theme":"light"}
+# {"label":"light-390x844","state":"reduced-motion","headerBottom":0,"progressTop":0,"scale":0.112149,"theme":"light"}
+# {"label":"light-320x640","state":"visible","headerBottom":60,"progressTop":60,"scale":0,"theme":"light"}
+# {"label":"light-320x640","state":"down","headerBottom":0,"progressTop":0,"scale":0.0632078,"theme":"light"}
+# {"label":"light-320x640","state":"reverse","headerBottom":60,"progressTop":60,"scale":0.0523114,"theme":"light"}
+# {"label":"light-320x640","state":"hidden-before-resize","headerBottom":0,"progressTop":0,"scale":0.0686561,"theme":"light"}
+# {"label":"light-320x640","state":"resized-desktop","headerBottom":84,"progressTop":84,"scale":0.175156,"theme":"light"}
+# {"label":"light-320x640","state":"resized-compact","headerBottom":60,"progressTop":60,"scale":0.0686561,"theme":"light"}
+# {"label":"light-320x640","state":"reduced-motion","headerBottom":0,"progressTop":0,"scale":0.0850007,"theme":"light"}
+# {"label":"light-1280x900","state":"visible","headerBottom":84,"progressTop":84,"scale":0,"theme":"light"}
+# {"label":"light-1280x900","state":"down","headerBottom":84,"progressTop":84,"scale":0.162857,"theme":"light"}
+# {"label":"light-1280x900","state":"reverse","headerBottom":84,"progressTop":84,"scale":0.162857,"theme":"light"}
+# {"label":"light-1024x400","state":"visible","headerBottom":84,"progressTop":84,"scale":0,"theme":"light"}
+# {"label":"light-1024x400","state":"down","headerBottom":0,"progressTop":0,"scale":0.153422,"theme":"light"}
+# {"label":"light-1024x400","state":"reverse","headerBottom":84,"progressTop":84,"scale":0.130249,"theme":"light"}
+# {"label":"light-1024x400","state":"hidden-before-resize","headerBottom":0,"progressTop":0,"scale":0.165009,"theme":"light"}
+# {"label":"light-1024x400","state":"resized-desktop","headerBottom":84,"progressTop":84,"scale":0.175156,"theme":"light"}
+# {"label":"light-1024x400","state":"resized-compact","headerBottom":84,"progressTop":84,"scale":0.165009,"theme":"light"}
+# {"label":"light-1024x400","state":"reduced-motion","headerBottom":0,"progressTop":0,"scale":0.199769,"theme":"light"}
+# {"label":"dark-390x844","state":"visible","headerBottom":60,"progressTop":60,"scale":0,"theme":"dark"}
+# {"label":"dark-390x844","state":"down","headerBottom":0,"progressTop":0,"scale":0.0844707,"theme":"dark"}
+# {"label":"dark-390x844","state":"reverse","headerBottom":60,"progressTop":60,"scale":0.0706316,"theme":"dark"}
+# {"label":"dark-390x844","state":"hidden-before-resize","headerBottom":0,"progressTop":0,"scale":0.0913903,"theme":"dark"}
+# {"label":"dark-390x844","state":"resized-desktop","headerBottom":84,"progressTop":84,"scale":0.175156,"theme":"dark"}
+# {"label":"dark-390x844","state":"resized-compact","headerBottom":60,"progressTop":60,"scale":0.0913903,"theme":"dark"}
+# {"label":"dark-390x844","state":"reduced-motion","headerBottom":0,"progressTop":0,"scale":0.112149,"theme":"dark"}
+# {"label":"dark-320x640","state":"visible","headerBottom":60,"progressTop":60,"scale":0,"theme":"dark"}
+# {"label":"dark-320x640","state":"down","headerBottom":0,"progressTop":0,"scale":0.0632078,"theme":"dark"}
+# {"label":"dark-320x640","state":"reverse","headerBottom":60,"progressTop":60,"scale":0.0523114,"theme":"dark"}
+# {"label":"dark-320x640","state":"hidden-before-resize","headerBottom":0,"progressTop":0,"scale":0.0686561,"theme":"dark"}
+# {"label":"dark-320x640","state":"resized-desktop","headerBottom":84,"progressTop":84,"scale":0.175156,"theme":"dark"}
+# {"label":"dark-320x640","state":"resized-compact","headerBottom":60,"progressTop":60,"scale":0.0686561,"theme":"dark"}
+# {"label":"dark-320x640","state":"reduced-motion","headerBottom":0,"progressTop":0,"scale":0.0850007,"theme":"dark"}
+# {"label":"dark-1280x900","state":"visible","headerBottom":84,"progressTop":84,"scale":0,"theme":"dark"}
+# {"label":"dark-1280x900","state":"down","headerBottom":84,"progressTop":84,"scale":0.162857,"theme":"dark"}
+# {"label":"dark-1280x900","state":"reverse","headerBottom":84,"progressTop":84,"scale":0.162857,"theme":"dark"}
+# {"label":"dark-1024x400","state":"visible","headerBottom":84,"progressTop":84,"scale":0,"theme":"dark"}
+# {"label":"dark-1024x400","state":"down","headerBottom":0,"progressTop":0,"scale":0.153422,"theme":"dark"}
+# {"label":"dark-1024x400","state":"reverse","headerBottom":84,"progressTop":84,"scale":0.130249,"theme":"dark"}
+# {"label":"dark-1024x400","state":"hidden-before-resize","headerBottom":0,"progressTop":0,"scale":0.165009,"theme":"dark"}
+# {"label":"dark-1024x400","state":"resized-desktop","headerBottom":84,"progressTop":84,"scale":0.175156,"theme":"dark"}
+# {"label":"dark-1024x400","state":"resized-compact","headerBottom":84,"progressTop":84,"scale":0.165009,"theme":"dark"}
+# {"label":"dark-1024x400","state":"reduced-motion","headerBottom":0,"progressTop":0,"scale":0.199769,"theme":"dark"}
+# Subtest: reading progress follows the visible header edge on the real blog route
+ok 1 - reading progress follows the visible header edge on the real blog route
+  ---
+  duration_ms: 20212.276856
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 20467.243157

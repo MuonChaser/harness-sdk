@@ -1,0 +1,12 @@
+
+> docs@1.0.0 format:check
+> prettier --check docs 'src/content/docs/**/*.ts'
+
+Checking formatting...
+[warn] src/content/docs/user-guide/sdk/context-management/presets.ts
+[warn] src/content/docs/user-guide/sdk/model-providers/amazon-bedrock.ts
+[warn] src/content/docs/user-guide/sdk/model-providers/index.ts
+[warn] src/content/docs/user-guide/sdk/storage/search-strategies.ts
+[warn] src/content/docs/user-guide/sdk/tools/vended-tools-imports.ts
+[warn] src/content/docs/user-guide/sdk/tools/vended-tools.ts
+[warn] Code style issues found in 6 files. Run Prettier with --write to fix.
