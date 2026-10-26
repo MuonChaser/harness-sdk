@@ -5,6 +5,7 @@ import { ttyInput, ttyOutput } from './fixtures/terminal.js'
 
 import { ChatApp } from '../src/tui/view/app.js'
 import { ChatController, type ChatBackend } from '../src/tui/chat/controller.js'
+import { ConversationManager } from '../src/tui/session/conversations.js'
 import { sanitizeTerminalText } from '../src/tui/terminal/sanitize.js'
 
 const instances: { unmount(): void }[] = []
@@ -16,6 +17,107 @@ afterEach(() => {
 })
 
 describe('TUI mouse input', () => {
+  // https://github.com/strands-agents/harness-sdk/issues/5531
+  it.each(['target', 'other', 'draft'] as const)(
+    'deletes a queued row through mouse input while preserving the appropriate composer state (%s)',
+    async (editing) => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const executed: string[] = []
+      const target = backend()
+      target.cancel = vi.fn()
+      target.stream = async function* (prompt) {
+        executed.push(prompt)
+        yield { type: 'textDelta', text: 'Working.' }
+        if (prompt === 'first') await gate
+        return { stopReason: 'endTurn' }
+      }
+      const primary = new ChatController(target, { settings: { animations: false } })
+      const controller = new ConversationManager(primary, { fork: async () => primary })
+      const input = ttyInput()
+      const output = ttyOutput(80, 24)
+      const frame = captureFrame(output)
+      const instance = render(createElement(ChatApp, { controller }), {
+        stdin: input,
+        stdout: output,
+        stderr: ttyOutput(80, 24),
+        exitOnCtrlC: false,
+        patchConsole: false,
+        interactive: true,
+      })
+      instances.push(instance)
+      const running = controller.submit('first')
+      await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('running'))
+      const second = controller.submit('second')
+      const removed = controller.submit('remove me')
+      await instance.waitUntilRenderFlush()
+      const click = async (rowText: string, button: string): Promise<void> => {
+        await instance.waitUntilRenderFlush()
+        const row = findText(frame(), rowText).row
+        const column = frame()[row]!.indexOf(button)
+        expect(column).toBeGreaterThanOrEqual(0)
+        input.write(mouseInputSequence(0, column, row, 'M'))
+        input.write(mouseInputSequence(3, column, row, 'm'))
+        await instance.waitUntilRenderFlush()
+      }
+      if (editing !== 'draft') {
+        await click(editing === 'target' ? 'remove me' : 'second', 'Edit')
+        await vi.waitFor(() => expect(frame().join('\n')).toContain('· editing'))
+      } else {
+        input.write('unrelated draft')
+        await instance.waitUntilRenderFlush()
+      }
+      await click('remove me', 'Delete')
+      await vi.waitFor(() =>
+        expect(controller.getSnapshot().queuedPrompts.map((item) => item.prompt)).toEqual(['second'])
+      )
+      await expect(removed).resolves.toBeUndefined()
+      expect(controller.getSnapshot().status).toBe('running')
+      expect(target.cancel).not.toHaveBeenCalled()
+      await instance.waitUntilRenderFlush()
+      if (editing === 'target') {
+        expect(frame().join('\n')).not.toContain('remove me')
+        expect(frame().join('\n')).not.toContain('· editing')
+        input.write('replacement')
+        await instance.waitUntilRenderFlush()
+        input.write('\r')
+        await vi.waitFor(() =>
+          expect(controller.getSnapshot().queuedPrompts.map((item) => item.prompt)).toEqual(['second', 'replacement'])
+        )
+      } else if (editing === 'other') {
+        expect(frame().join('\n')).toContain('second · editing')
+        input.write(' updated')
+        await instance.waitUntilRenderFlush()
+        input.write('\r')
+        await vi.waitFor(() =>
+          expect(controller.getSnapshot().queuedPrompts.map((item) => item.prompt)).toEqual(['second updated'])
+        )
+      } else {
+        expect(frame().join('\n')).toContain('unrelated draft')
+        input.write('\r')
+        await vi.waitFor(() =>
+          expect(controller.getSnapshot().queuedPrompts.map((item) => item.prompt)).toEqual([
+            'second',
+            'unrelated draft',
+          ])
+        )
+      }
+      release()
+      await Promise.all([running, second])
+      await vi.waitFor(() => expect(controller.busy).toBe(false))
+      expect(executed).toEqual(
+        editing === 'target'
+          ? ['first', 'second', 'replacement']
+          : editing === 'other'
+            ? ['first', 'second updated']
+            : ['first', 'second', 'unrelated draft']
+      )
+      await controller.dispose()
+    }
+  )
+
   it.each([80, 60])('traverses Color mode and inline Theme segments at %i columns', async (width) => {
     const input = ttyInput()
     const output = ttyOutput(width, 30)

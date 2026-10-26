@@ -514,6 +514,7 @@ export interface ChatControllerApi {
   enqueuePeerMessage?(message: PeerMessage): boolean
   steer(input: string): Promise<ChatTurn | undefined>
   steerQueued(id?: string): boolean
+  removeQueuedPrompt(id: string): boolean
   updateQueuedPrompt(id: string, prompt: string): boolean
   moveQueuedPrompt(id: string, direction: -1 | 1): boolean
   cancel(): boolean

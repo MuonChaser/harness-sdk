@@ -27,7 +27,7 @@ import { FadeIn } from './fade-in.js'
 
 const MAX_VISIBLE_BACKGROUND_TASKS = 4
 
-export type QueuedPromptAction = 'edit' | 'up' | 'down' | 'steer'
+export type QueuedPromptAction = 'edit' | 'up' | 'down' | 'steer' | 'delete'
 export type QueuedPromptTarget = `${string}:${QueuedPromptAction}`
 
 export function ChatView(props: Parameters<typeof ChatViewContent>[0]): ReactElement {
@@ -516,6 +516,7 @@ function QueuedPromptSummary({
                       { target: `${prompt.id}:down`, label: '↓', disabled: userIndex === userPrompts.length - 1 },
                       { target: `${prompt.id}:edit`, label: 'Edit', active: editingId === prompt.id },
                       { target: `${prompt.id}:steer`, label: 'Steer' },
+                      { target: `${prompt.id}:delete`, label: 'Delete' },
                     ] as const
                   ).map((button) => (
                     <QueueButton

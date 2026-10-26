@@ -399,6 +399,22 @@ export class ChatController implements ChatControllerApi {
     return true
   }
 
+  removeQueuedPrompt(id: string): boolean {
+    if (this._closed) {
+      return false
+    }
+    const index = this._pendingSubmissions.findIndex((pending) => pending.kind === 'user' && pending.id === id)
+    if (index < 0) {
+      return false
+    }
+    const [pending] = this._pendingSubmissions.splice(index, 1)
+    if (pending?.kind === 'user') {
+      pending.resolve(undefined)
+    }
+    this._emit()
+    return true
+  }
+
   updateQueuedPrompt(id: string, prompt: string): boolean {
     const normalized = prompt.trim()
     const pending = this._pendingSubmissions.find(

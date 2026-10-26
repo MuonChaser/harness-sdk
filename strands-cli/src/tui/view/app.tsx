@@ -672,6 +672,17 @@ export function ChatApp({
         }
         if (target.action === 'steer') {
           controller.steerQueued(target.id)
+        } else if (target.action === 'delete') {
+          if (controller.removeQueuedPrompt(target.id) && editingQueuedPromptId === target.id) {
+            setEditingQueuedPromptId(undefined)
+            setEditor({
+              ...currentEditor,
+              input: '',
+              cursor: 0,
+              historyIndex: currentEditor.history.length,
+              draft: '',
+            })
+          }
         } else if (target.action === 'up' || target.action === 'down') {
           controller.moveQueuedPrompt(target.id, target.action === 'up' ? -1 : 1)
         } else {
@@ -699,6 +710,7 @@ export function ChatApp({
       controller,
       dispatchPrompt,
       footerElements,
+      editingQueuedPromptId,
       metadataElements,
       panelControlElements,
       panelFilterElements,
@@ -1270,7 +1282,7 @@ function parseQueuedPromptTarget(target: QueuedPromptTarget): { id: string; acti
   const separator = target.lastIndexOf(':')
   const id = target.slice(0, separator)
   const action = target.slice(separator + 1)
-  if (!id || (action !== 'edit' && action !== 'up' && action !== 'down' && action !== 'steer')) {
+  if (!id || (action !== 'edit' && action !== 'up' && action !== 'down' && action !== 'steer' && action !== 'delete')) {
     return undefined
   }
   return { id, action }

@@ -897,6 +897,100 @@ describe('ChatController', () => {
     await vi.waitFor(() => expect(idle).toHaveBeenCalledOnce())
   })
 
+  // https://github.com/strands-agents/harness-sdk/issues/5531
+  it.each(['prompt', 'shell'] as const)(
+    'removes pending messages during an active %s without cancelling it or disturbing the remaining order',
+    async (mode) => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const executed: string[] = []
+      const target = backend(async function* (prompt) {
+        executed.push(prompt)
+        yield { type: 'textDelta', text: 'Working.' }
+        if (prompt === 'first') await gate
+        return { stopReason: 'endTurn' }
+      })
+      target.streamShell = target.stream
+      target.streamPeer = async function* (message) {
+        executed.push(message.body)
+        yield { type: 'textDelta', text: 'Peer message handled.' }
+        return { stopReason: 'endTurn' }
+      }
+      const controller = new ChatController(target)
+      const running = controller.submit(mode === 'shell' ? '!first' : 'first')
+      await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('running'))
+      controller.enqueuePeerMessage({ from: { id: 'peer', name: 'Peer' }, body: 'peer message' })
+      const second = controller.submit('second')
+      const removed = controller.submit('remove me')
+      const third = controller.submit('third')
+      const removedShell = controller.submit('!do not execute')
+      const settled = vi.fn()
+      void removed.then(settled)
+      const updates = vi.fn()
+      controller.subscribe(updates)
+      const ids = controller.getSnapshot().queuedPrompts.map((prompt) => prompt.id)
+
+      expect(controller.moveQueuedPrompt(ids[2]!, -1)).toBe(true)
+      expect(controller.removeQueuedPrompt(ids[0]!)).toBe(false)
+      expect(controller.removeQueuedPrompt(ids[2]!)).toBe(true)
+      expect(controller.removeQueuedPrompt(ids[4]!)).toBe(true)
+      expect(updates).toHaveBeenCalledTimes(3)
+      await expect(removed).resolves.toBeUndefined()
+      await expect(removedShell).resolves.toBeUndefined()
+      expect(settled).toHaveBeenCalledOnce()
+      expect(controller.removeQueuedPrompt(ids[2]!)).toBe(false)
+      expect(controller.removeQueuedPrompt('missing')).toBe(false)
+      expect(controller.getSnapshot().queuedPrompts.map((prompt) => prompt.prompt)).toEqual([
+        'peer message',
+        'second',
+        'third',
+      ])
+      expect(controller.getSnapshot().status).toBe('running')
+      expect(target.cancel).not.toHaveBeenCalled()
+      expect(executed).toEqual(['first'])
+
+      release()
+      await Promise.all([running, second, third])
+      expect(executed).toEqual(['first', 'peer message', 'second', 'third'])
+      expect(controller.removeQueuedPrompt(ids[1]!)).toBe(false)
+      controller.close()
+      expect(controller.removeQueuedPrompt(ids[3]!)).toBe(false)
+      await controller.dispose()
+      expect(settled).toHaveBeenCalledOnce()
+    }
+  )
+
+  it('resolves each submission once when a pending batch is deleted and then closed', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const target = backend(async function* () {
+      yield { type: 'textDelta', text: 'Working.' }
+      await gate
+      return { stopReason: 'endTurn' }
+    })
+    const controller = new ChatController(target)
+    const running = controller.submit('first')
+    await vi.waitFor(() => expect(controller.getSnapshot().status).toBe('running'))
+    const settled = vi.fn()
+    const pending = Array.from({ length: 3 }, (_, i) => controller.submit(`pending ${i}`).then(settled))
+    const ids = controller.getSnapshot().queuedPrompts.map((prompt) => prompt.id)
+    for (const id of ids) expect(controller.removeQueuedPrompt(id)).toBe(true)
+    await Promise.all(pending)
+    expect(settled).toHaveBeenCalledTimes(3)
+    expect(controller.getSnapshot().queuedPrompts).toEqual([])
+    expect(target.cancel).not.toHaveBeenCalled()
+    controller.close()
+    for (const id of ids) expect(controller.removeQueuedPrompt(id)).toBe(false)
+    release()
+    await running
+    await controller.dispose()
+    expect(settled).toHaveBeenCalledTimes(3)
+  })
+
   it('queues peer messages at the turn boundary without interpreting them as local commands', async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
