@@ -1,19 +1,23 @@
 """Tests for the ContextOffloader plugin."""
 
+import asyncio
 import json
 import logging
 import math
+from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from strands.hooks.events import AfterToolCallEvent, BeforeModelCallEvent
+from strands import Agent, tool
+from strands.hooks.events import AfterToolCallEvent, BeforeModelCallEvent, BeforeToolCallEvent
 from strands.types.tools import ToolContext, ToolUse
 from strands.vended_plugins.context_offloader import (
     ContextOffloader,
     FileStorage,
     InMemoryStorage,
 )
+from tests.fixtures.mocked_model_provider import MockedModelProvider
 from tests.fixtures.sandbox import TestSandbox
 
 
@@ -90,9 +94,8 @@ class TestContextOffloader:
         assert plugin.name == "context_offloader"
 
     def test_hooks_auto_discovered(self, plugin):
-        assert len(plugin.hooks) == 2
+        assert len(plugin.hooks) == 1
         hook_names = {h.__name__ for h in plugin.hooks}
-        assert "_handle_tool_result" in hook_names
         assert "_on_before_model_call" in hook_names
 
     def test_raises_on_non_positive_max_result_tokens(self):
@@ -1499,3 +1502,140 @@ class TestShouldOffloadCallback:
         await plugin._handle_tool_result(event)
 
         assert "[Offloaded:" in event.result["content"][0]["text"]
+
+
+@pytest.fixture
+def make_hook_order_agent():
+    def make_agent(text, hooks, *, raises=False):
+        @tool
+        def output_tool() -> str:
+            """Return text for audit and offloading."""
+            if raises:
+                raise ValueError(text)
+            return text
+
+        model = MockedModelProvider(
+            [
+                {
+                    "role": "assistant",
+                    "content": [{"toolUse": {"toolUseId": "audit_call", "name": output_tool.tool_name, "input": {}}}],
+                },
+                {"role": "assistant", "content": [{"text": "done"}]},
+            ]
+        )
+        storage = InMemoryStorage()
+        agent = Agent(
+            model=model,
+            tools=[output_tool],
+            hooks=hooks,
+            plugins=[ContextOffloader(storage=storage, max_result_tokens=100, preview_tokens=10)],
+            callback_handler=None,
+        )
+        return agent, storage
+
+    return make_agent
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+@pytest.mark.parametrize("async_audit", [False, True])
+def test_handle_tool_result_audit_sees_full_output(make_hook_order_agent, async_invocation, async_audit):
+    """Default audit hooks see the full output before preview replacement (#5596)."""
+    text = "public line\n" * 100 + "sensitive tail\n"
+    snapshots = []
+
+    def audit(event: AfterToolCallEvent):
+        snapshots.append(deepcopy(event.result))
+
+    async def audit_async(event: AfterToolCallEvent):
+        await asyncio.sleep(0)
+        audit(event)
+
+    agent, storage = make_hook_order_agent(text, [audit_async if async_audit else audit])
+    if async_invocation:
+        asyncio.run(agent.invoke_async("run the tool"))
+    else:
+        agent("run the tool")
+
+    exp_result = {"toolUseId": "audit_call", "status": "success", "content": [{"text": text}]}
+    assert snapshots == [exp_result]
+    tru_result = agent.messages[2]["content"][0]["toolResult"]
+    preview = tru_result["content"][0]["text"]
+    assert "[Offloaded:" in preview
+    assert text[:40] in preview
+    assert "sensitive tail" not in preview
+    reference = preview.split("[Stored references:]\n  ")[1].split(" ")[0]
+    assert asyncio.run(storage.retrieve(reference)) == (text.encode(), "text/plain")
+    retrieved = agent.tool.retrieve_offloaded_content(reference=reference)
+    assert retrieved["content"] == [{"text": text}]
+    searched = agent.tool.retrieve_offloaded_content(reference=reference, pattern="sensitive tail", context_lines=0)
+    assert "sensitive tail" in searched["content"][0]["text"]
+
+
+@pytest.mark.parametrize("replacement", ["redacted", "safe line\n" * 100], ids=["small", "oversized"])
+@pytest.mark.parametrize("async_hook", [False, True])
+def test_handle_tool_result_uses_earlier_mutation(make_hook_order_agent, replacement, async_hook):
+    """Only content approved by default result hooks may enter storage (#5596)."""
+    text = "secret line\n" * 100
+
+    def redact(event: AfterToolCallEvent):
+        event.result = {**event.result, "content": [{"text": replacement}]}
+
+    async def redact_async(event: AfterToolCallEvent):
+        await asyncio.sleep(0)
+        redact(event)
+
+    agent, storage = make_hook_order_agent(text, [redact_async if async_hook else redact])
+    agent("run the tool")
+
+    tru_result = agent.messages[2]["content"][0]["toolResult"]
+    if len(replacement) > 400:
+        preview = tru_result["content"][0]["text"]
+        assert "[Offloaded:" in preview
+        reference = preview.split("[Stored references:]\n  ")[1].split(" ")[0]
+        assert asyncio.run(storage.retrieve(reference)) == (replacement.encode(), "text/plain")
+    else:
+        exp_result = {"toolUseId": "audit_call", "status": "success", "content": [{"text": replacement}]}
+        assert tru_result == exp_result
+        assert not storage._store
+
+
+@pytest.mark.parametrize("case", ["small", "cancel", "error", "deny"])
+def test_handle_tool_result_controls(make_hook_order_agent, case):
+    """Small, cancelled, failed, and denied calls retain their result semantics (#5596)."""
+    text = "small" if case == "small" else "tool output\n" * 100
+    snapshots = []
+
+    def audit(event: AfterToolCallEvent):
+        snapshots.append(deepcopy(event.result))
+
+    def cancel(event: BeforeToolCallEvent):
+        event.cancel_tool = "cancelled by policy"
+
+    def deny(event: AfterToolCallEvent):
+        event.result = {"toolUseId": event.tool_use["toolUseId"], "status": "error", "content": [{"text": "denied"}]}
+
+    hooks = [audit]
+    if case == "cancel":
+        hooks.append(cancel)
+    elif case == "deny":
+        hooks.append(deny)
+    agent, storage = make_hook_order_agent(text, hooks, raises=case == "error")
+    agent("run the tool")
+
+    expected_text = {"small": text, "cancel": "cancelled by policy", "error": f"Error: {text}", "deny": "denied"}[case]
+    exp_result = {
+        "toolUseId": "audit_call",
+        "status": "success" if case == "small" else "error",
+        "content": [{"text": expected_text}],
+    }
+    assert snapshots == [exp_result]
+    tru_result = agent.messages[2]["content"][0]["toolResult"]
+    if case == "error":
+        preview = tru_result["content"][0]["text"]
+        assert tru_result["status"] == "error"
+        assert "[Offloaded:" in preview
+        reference = preview.split("[Stored references:]\n  ")[1].split(" ")[0]
+        assert asyncio.run(storage.retrieve(reference)) == (expected_text.encode(), "text/plain")
+    else:
+        assert tru_result == exp_result
+        assert not storage._store

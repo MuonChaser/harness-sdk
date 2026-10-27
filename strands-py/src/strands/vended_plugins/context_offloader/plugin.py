@@ -53,6 +53,7 @@ from typing_extensions import TypedDict
 
 from ...agent._agent_as_tool import _AgentAsTool
 from ...hooks.events import AfterToolCallEvent, BeforeModelCallEvent
+from ...hooks.registry import HookOrder
 from ...plugins import Plugin, hook
 from ...storage import Storage
 from ...storage.storage import _NAMESPACED, _NamespacedStorage
@@ -319,6 +320,7 @@ class ContextOffloader(Plugin):
         Storage is resolved on the first call and cached for the instance lifetime; a single
         ContextOffloader should not be shared across agents with differing storage backends.
         """
+        agent.add_hook(self._handle_tool_result, AfterToolCallEvent, order=HookOrder.SDK_LAST)
         if self._storage is None:
             if agent.storage is not None:
                 self._storage = self._resolve_storage(agent.storage)
@@ -465,7 +467,6 @@ class ContextOffloader(Plugin):
 
         return content_bytes.decode("utf-8", errors="replace")
 
-    @hook
     async def _handle_tool_result(self, event: AfterToolCallEvent) -> None:
         """Intercept oversized tool results, offload per-block, and replace with preview."""
         if event.cancel_message is not None:
