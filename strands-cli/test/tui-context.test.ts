@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentModelRuntime } from '../src/tui/model/runtime.js'
 import { contextWindowLimit } from '../src/tui/model/context.js'
+import { formatContext } from '../src/tui/view/presentation.js'
 import { discoverContextWindow } from '../src/tui/provider/discovery.js'
 
 afterEach(() => {
@@ -76,6 +77,23 @@ describe('context window limits', () => {
   ])('fills missing SDK metadata for %s', (modelId, limit) => {
     expect(contextWindowLimit(new BedrockModel({ modelId }))).toBe(limit)
   })
+
+  // The gauge must resolve GPT-6.1 Terra with a published SDK lacking metadata (#5559).
+  it.each(['gpt-6.1-terra', 'openai.gpt-6.1-terra', 'us.openai.gpt-6.1-terra', 'global.openai.gpt-6.1-terra'])(
+    'fills missing SDK metadata for %s',
+    async (modelId) => {
+      const model = new BedrockModel({ modelId })
+      vi.spyOn(model, 'getConfig').mockReturnValue({ modelId })
+
+      expect(contextWindowLimit(model)).toBe(1_050_000)
+      const runtime = new AgentModelRuntime({ model } as unknown as Agent, {
+        initialModel: `bedrock/${modelId}`,
+      })
+      const contextWindow = await runtime.contextWindow()
+      expect(contextWindow).toBe(1_050_000)
+      expect(formatContext({ currentTokens: 525_000, contextWindow: contextWindow! })).toBe('█████░░░░░ 50%')
+    }
+  )
 
   it('prefers SDK metadata over the fallback for newer models', () => {
     const model = new BedrockModel({ modelId: 'openai.gpt-oss-120b' })
