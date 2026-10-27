@@ -146,13 +146,13 @@ class TestSearchContentTruncation:
         text = "\n".join(f"match line {i + 1}" for i in range(500))
         result = _search_content(text, pattern="match", context_lines=0, max_chars=200)
         assert "output truncated, narrow your search" in result
-        assert len(result) <= 250
+        assert len(result) <= 200 + len("[500 matches for /match/]\n\n\n\n[output truncated, narrow your search]")
 
     def test_truncates_line_range_results(self):
         text = "\n".join(f"line {i + 1}" for i in range(500))
         result = _search_content(text, line_range=(1, 500), context_lines=5, max_chars=200)
         assert "output truncated, narrow your range" in result
-        assert len(result) <= 250
+        assert len(result) <= 200 + len("[Lines 1-500 of 500]\n\n\n\n[output truncated, narrow your range]")
 
     def test_no_truncation_when_fits(self):
         text = "short\ncontent"
@@ -208,3 +208,20 @@ class TestSearchContentEdgeCases:
         from strands.vended_plugins.context_offloader.search import _format_lines
 
         assert _format_lines(["a", "b"], [], set()) == ""
+
+
+@pytest.mark.parametrize("max_chars", [0, 1, 4, 12, 13, 14, 20, 50, 100])
+def test_search_retains_budgeted_content_of_straddling_line(max_chars):
+    # https://github.com/strands-agents/harness-sdk/issues/5597
+    text = "context\nneedle " + "界" * 60
+    body = "  1| context\n> 2| needle " + "界" * 60
+    tru_result = _search_content(text, pattern="needle", max_chars=max_chars)
+    exp_body = body if len(body) <= max_chars else body[:max_chars] + "\n\n[output truncated, narrow your search]"
+    assert tru_result == f"[1 match for /needle/]\n\n{exp_body}"
+
+
+def test_line_range_retains_partial_long_line_after_short_line():
+    text = "short\n" + "界" * 60
+    tru_result = _search_content(text, line_range=(1, 2), max_chars=30)
+    exp_result = "[Lines 1-2 of 2]\n\n  1| short\n  2| " + "界" * 14 + "\n\n[output truncated, narrow your range]"
+    assert tru_result == exp_result

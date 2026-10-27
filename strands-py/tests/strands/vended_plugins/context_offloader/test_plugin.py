@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from strands import Agent, tool
 from strands.hooks.events import AfterToolCallEvent, BeforeModelCallEvent
 from strands.types.tools import ToolContext, ToolUse
 from strands.vended_plugins.context_offloader import (
@@ -14,6 +15,7 @@ from strands.vended_plugins.context_offloader import (
     FileStorage,
     InMemoryStorage,
 )
+from tests.fixtures.mocked_model_provider import MockedModelProvider
 from tests.fixtures.sandbox import TestSandbox
 
 
@@ -1499,3 +1501,47 @@ class TestShouldOffloadCallback:
         await plugin._handle_tool_result(event)
 
         assert "[Offloaded:" in event.result["content"][0]["text"]
+
+
+@pytest.mark.parametrize(
+    ("preview_tokens", "text", "expected"),
+    [
+        (0, "long text", ""),
+        (1, "abcdefghij", "abcd"),
+        (2, "abcdefghijklmnop", "a\n...\nop"),
+        (5, "首" * 30 + "尾" * 30, "首" * 9 + "\n...\n" + "尾" * 6),
+        (2, "😀" * 8 + "終" * 8, "😀\n...\n終終"),
+        (2, "short", "short"),
+        (2, "12345678", "12345678"),
+        (2, "", ""),
+    ],
+)
+def test_slice_preview_retains_bounded_head_and_tail(preview_tokens, text, expected):
+    # https://github.com/strands-agents/harness-sdk/issues/5597
+    plugin = ContextOffloader(storage=InMemoryStorage(), max_result_tokens=100, preview_tokens=preview_tokens)
+    tru_preview = plugin._slice_preview(text)
+    assert tru_preview == expected
+    assert len(tru_preview) <= preview_tokens * 4
+
+
+@pytest.mark.parametrize("file_storage", [False, True])
+def test_offload_then_search_retains_long_matching_line(file_storage, tmp_path):
+    # https://github.com/strands-agents/harness-sdk/issues/5597
+    text = "context\nneedle " + "界" * 1000
+
+    @tool
+    def document() -> str:
+        """Return the document."""
+        return text
+
+    storage = FileStorage(str(tmp_path)) if file_storage else InMemoryStorage()
+    plugin = ContextOffloader(storage=storage, max_result_tokens=100, preview_tokens=20)
+    agent = Agent(model=MockedModelProvider([]), tools=[document], plugins=[plugin], callback_handler=None)
+    result = agent.tool.document()
+    assert "[Offloaded:" in result["content"][0]["text"]
+    reference = result["content"][0]["text"].split("[Stored references:]\n  ")[1].split(" ")[0]
+    retrieved = agent.tool.retrieve_offloaded_content(reference=reference, pattern="needle")
+    tru_text = retrieved["content"][0]["text"]
+    exp_body = "  1| context\n> 2| needle " + "界" * (400 - len("  1| context\n> 2| needle "))
+    assert tru_text == f"[1 match for /needle/]\n\n{exp_body}\n\n[output truncated, narrow your search]"
+    assert agent.tool.retrieve_offloaded_content(reference=reference)["content"] == [{"text": text}]

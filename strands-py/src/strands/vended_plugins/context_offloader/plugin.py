@@ -567,7 +567,6 @@ class ContextOffloader(Plugin):
             token_count,
         )
 
-        # Build preview text — use tiktoken for exact slicing when available
         preview = self._slice_preview(full_text) if full_text else ""
         # Skip None: non-bytes image/document sources were left unstored (#4017).
         ref_lines = "\n".join(
@@ -662,7 +661,7 @@ class ContextOffloader(Plugin):
         logger.debug("reference=<%s>, cycle=<%d> | retrieve refreshed eviction cycle", reference, cycle)
 
     def _slice_preview(self, text: str) -> str:
-        """Slice text to approximately preview_tokens using character-based estimation.
+        """Keep head and tail text within the character-estimated preview budget.
 
         Args:
             text: The full text to slice.
@@ -670,4 +669,12 @@ class ContextOffloader(Plugin):
         Returns:
             The preview text.
         """
-        return text[: self._preview_tokens * _CHARS_PER_TOKEN]
+        max_chars = self._preview_tokens * _CHARS_PER_TOKEN
+        separator = "\n...\n"
+        if len(text) <= max_chars or max_chars <= len(separator):
+            return text[:max_chars]
+
+        content_chars = max_chars - len(separator)
+        head_chars = content_chars * 3 // 5
+        tail_chars = content_chars - head_chars
+        return text[:head_chars] + separator + text[-tail_chars:]

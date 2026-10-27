@@ -1,4 +1,6 @@
 import pytest
+from strands import Agent
+from strands.vended_plugins.context_offloader import ContextOffloader, InMemoryStorage
 
 from strands_harness import create_harness
 from strands_harness.tools import edit, make_read, read, write
@@ -193,3 +195,29 @@ async def test_media_off_leaves_text_reads_untouched(ctx, tmp_path):
     await write._tool_func(path=path, content="alpha\nbeta\n", tool_context=ctx)
     out = await make_read(media=False)._tool_func(path=path, tool_context=ctx)
     assert "     1\talpha" in out
+
+
+def test_read_offloaded_preview_preserves_pagination_and_pages_forward(ctx, tmp_path):
+    # https://github.com/strands-agents/harness-sdk/issues/5597
+    path = tmp_path / "paged.txt"
+    path.write_text("\n".join(["visible 界" * 10] * 2000 + ["needle beyond first page"]), encoding="utf-8")
+    plugin = ContextOffloader(storage=InMemoryStorage())
+    agent = Agent(model=ctx.agent.model, tools=[read], plugins=[plugin], callback_handler=None)
+
+    first = agent.tool.read(path=str(path))
+    preview = first["content"][0]["text"]
+    footer = "[Showing lines 1-2000 of 2001. Use offset/limit to read more.]"
+    assert "[Offloaded:" in preview
+    assert "     1\tvisible 界" in preview
+    assert footer in preview
+    reference = preview.split("[Stored references:]\n  ")[1].split(" ")[0]
+
+    stored = agent.tool.retrieve_offloaded_content(reference=reference)["content"][0]["text"]
+    assert stored.endswith(footer)
+    assert len(stored.split("\n")) == 2001
+    missing = agent.tool.retrieve_offloaded_content(reference=reference, pattern="needle")
+    assert missing["content"] == [{"text": "No matches found for pattern 'needle' (searched 2001 lines)."}]
+    page = agent.tool.read(path=str(path), offset=2001)
+    assert page["content"] == [
+        {"text": "  2001\tneedle beyond first page\n[Showing lines 2001-2001 of 2001. Use offset/limit to read more.]"}
+    ]

@@ -86,14 +86,11 @@ def _search_content(
 
 
 def _truncate(output: str, max_chars: int, message: str) -> str:
-    """Cut output at the last newline before max_chars and append a truncation message."""
+    """Keep output up to max_chars, including partial lines, and mark truncation."""
     if len(output) <= max_chars:
         return output
 
-    cut = output.rfind("\n", 0, max_chars)
-    slice_end = cut if cut > 0 else max_chars
-
-    return output[:slice_end] + f"\n\n[{message}]"
+    return output[:max_chars] + f"\n\n[{message}]"
 
 
 def _format_lines(lines: list[str], indices: list[int], matched_set: set[int]) -> str:
