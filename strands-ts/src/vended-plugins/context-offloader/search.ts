@@ -5,14 +5,11 @@
  * text content, with output capped to a character budget.
  */
 
-/** Cuts output at the last newline before {@link maxChars} and appends a truncation message. */
+/** Keeps output up to {@link maxChars}, including partial lines, and appends a truncation message. */
 function truncate(output: string, maxChars: number, message: string): string {
   if (output.length <= maxChars) return output
 
-  const cut = output.lastIndexOf('\n', maxChars)
-  const sliceEnd = cut > 0 ? cut : maxChars
-
-  return output.slice(0, sliceEnd) + `\n\n[${message}]`
+  return output.slice(0, maxChars) + `\n\n[${message}]`
 }
 
 /** Formats line indices with line numbers, `>` prefixes for matches, and `---` separators for gaps. */

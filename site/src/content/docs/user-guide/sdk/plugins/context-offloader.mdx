@@ -23,28 +23,62 @@ The default [`SlidingWindowConversationManager`](../agents/conversation-manageme
 After each tool call, the plugin estimates the result's token count and compares it against the <Syntax py="max_result_tokens" ts="maxResultTokens" /> threshold (default: 2,500 tokens). If the result exceeds it, the plugin:
 
 1. Stores each content block individually in the configured storage backend, preserving its content type
-2. Replaces the in-context result with the first <Syntax py="preview_tokens" ts="previewTokens" /> tokens (default: 1,000) plus per-block storage references
+2. Replaces the in-context result with a text preview sized by
+   <Syntax py="preview_tokens" ts="previewTokens" /> (default: 1,000)
+   plus per-block storage references
 
 Token estimation uses <Syntax py="model.count_tokens()" ts="model.countTokens()" />, which delegates to the model provider's native counting API if available, otherwise falling back to a character-based heuristic (chars/4 for text, chars/2 for JSON).
 
 Results under the threshold pass through unchanged.
 
+<Tabs>
+<Tab label="Python">
+The preview keeps the leading text, up to four characters per preview token.
+Head-and-tail previews are tracked in
+[#5597](https://github.com/strands-agents/harness-sdk/issues/5597).
+</Tab>
+<Tab label="TypeScript">
+The preview keeps the beginning and end of the text, separated by `...` on its own
+line. The marker counts toward the limit of four UTF-16 code units per preview
+token. The remaining space is split 60% for the beginning and 40% for the end.
+Text that fits stays unchanged; budgets too small for the marker keep leading text.
+
+Default user `AfterToolCallEvent` hooks run before the offloader replaces the result,
+so audit hooks can inspect the complete output. The offloader uses `HookOrder.SDK_LAST`;
+hooks with a higher order can inspect the replacement.
+</Tab>
+</Tabs>
+
 ### What the agent sees
 
-For a tool that returns 150KB of JSON, the agent would see something like:
+For a large text result, the preview portion can look like:
 
+<Tabs>
+<Tab label="Python">
 ```
-{"users": [{"id": 1, "name": "Alice", ...}, {"id": 2, "name": "Bob", ...},
-... (first ~1,000 tokens of the result) ...
+line 1: data
+line 2: data
+... (leading text up to the preview budget)
+```
+</Tab>
+<Tab label="TypeScript">
+```
+line 1: data
+line 2: data
+...
+line 200: data
+[Showing lines 1-200 of 5000. Use offset/limit to read more.]
+```
+</Tab>
+</Tabs>
 
-[Full content offloaded to storage - reference: a1b2c3d4]
-```
+The result also includes retrieval guidance and per-block storage references.
 
 For non-text content, the plugin replaces the result with a descriptive placeholder plus a reference:
 
 | Content Type | What the agent sees |
 |-------------|----------|
-| Text / JSON | First <Syntax py="preview_tokens" ts="previewTokens" /> tokens + storage reference |
+| Text / JSON | Text preview + storage reference |
 | Image | `[image: format, N bytes]` placeholder + storage reference |
 | Document | `[document: format, name, N bytes]` placeholder + storage reference |
 
@@ -321,7 +355,7 @@ If you need more detail, use retrieve_offloaded_content with a reference and:
   - line_range: { start, end } to read a specific span of lines
 Retrieve full content (omit pattern/line_range) as a last resort.
 
-{"users":[{"id":1,"name":"Alice","role":"admin"},{"id":2,"name":"Bob","role":"user"},{"id":3,"name":"Charlie","rol
+[Text preview, as illustrated above]
 
 [Stored references:]
   mem_1_tool-123_0 (json, 42,000 bytes)

@@ -86,6 +86,26 @@ describe('ContextOffloader', () => {
     })
   })
 
+  // https://github.com/strands-agents/harness-sdk/issues/5604
+  describe('retrieval truncation', () => {
+    it('retains a partial first matched line after short context', async () => {
+      const storage = new InMemoryStorage()
+      const reference = await storage.store(
+        'long-match',
+        new TextEncoder().encode('context\nneedle ' + 'x'.repeat(1000)),
+        'text/plain'
+      )
+      const plugin = new ContextOffloader({ storage, maxResultTokens: 25, previewTokens: 5 })
+      const retrieval = plugin.getTools()[0]! as unknown as { invoke(input: unknown): Promise<string> }
+      const output = await retrieval.invoke({ reference, pattern: 'needle', context_lines: 1 })
+      expect(output).toBe(
+        '[1 match for /needle/]\n\n  1| context\n> 2| needle ' +
+          'x'.repeat(75) +
+          '\n\n[output truncated, narrow your search]'
+      )
+    })
+  })
+
   describe('hook behavior', () => {
     it('does not offload results below threshold', async () => {
       const storage = new InMemoryStorage()
@@ -265,8 +285,7 @@ describe('ContextOffloader', () => {
 
       const preview = (event.result.content[0] as TextBlock).text
       const previewSection = preview.split('[Stored references:]')[0]
-      // previewTokens=2 → 2*4=8 chars of 'a' in preview
-      expect(previewSection).toContain('a'.repeat(8))
+      expect(previewSection).toContain('a\n...\naa')
       expect(previewSection).not.toContain('a'.repeat(100))
     })
 

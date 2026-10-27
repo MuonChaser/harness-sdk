@@ -3,6 +3,7 @@ import type { Tool, ToolContext } from '../../tools/tool.js'
 import type { LocalAgent } from '../../types/agent.js'
 import type { Sandbox } from '../../sandbox/base.js'
 import { AfterToolCallEvent, BeforeModelCallEvent } from '../../hooks/events.js'
+import { HookOrder } from '../../hooks/types.js'
 import { TextBlock, JsonBlock, ToolResultBlock, Message } from '../../types/messages.js'
 import type { ToolResultContent } from '../../types/messages.js'
 import { ImageBlock, VideoBlock, DocumentBlock } from '../../types/media.js'
@@ -91,9 +92,14 @@ const retrievalInputSchema = z.object({
 })
 
 function slicePreview(text: string, previewTokens: number): string {
-  const maxChars = previewTokens * CHARS_PER_TOKEN
-  if (text.length <= maxChars) return text
-  return text.slice(0, maxChars)
+  const maxChars = Math.floor(previewTokens * CHARS_PER_TOKEN)
+  const separator = '\n...\n'
+  if (text.length <= maxChars || maxChars <= separator.length) return text.slice(0, maxChars)
+
+  const contentChars = maxChars - separator.length
+  const headChars = Math.floor(contentChars * 0.6)
+  const tailChars = contentChars - headChars
+  return text.slice(0, headChars) + separator + text.slice(-tailChars)
 }
 
 function getBytes(block: ToolResultContent): Uint8Array | undefined {
@@ -266,7 +272,7 @@ export class ContextOffloader implements Plugin {
       this._storage._bind(agent, this._evictAfterCycles)
     }
     this._storageForAgent(agent)
-    agent.addHook(AfterToolCallEvent, (event) => this._handleToolResult(event))
+    agent.addHook(AfterToolCallEvent, (event) => this._handleToolResult(event), { order: HookOrder.SDK_LAST })
 
     agent.addHook(BeforeModelCallEvent, () => {
       const cycleCount = agent.metrics.cycleCount

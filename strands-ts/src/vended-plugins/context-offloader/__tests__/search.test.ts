@@ -164,6 +164,19 @@ describe('searchContent', () => {
   })
 
   describe('truncation', () => {
+    // https://github.com/strands-agents/harness-sdk/issues/5604
+    it.each([
+      { budget: 0, expected: '' },
+      { budget: 1, expected: '>' },
+      { budget: 9, expected: '> 1| matc' },
+      { budget: 10, expected: '> 1| match' },
+    ])('keeps headers separate from a $budget-character body budget', ({ budget, expected }) => {
+      const suffix = budget < 10 ? '\n\n[output truncated, narrow your search]' : ''
+      expect(searchContent('match', { pattern: 'match', context_lines: 0 }, budget)).toBe(
+        '[1 match for /match/]\n\n' + expected + suffix
+      )
+    })
+
     it('truncates pattern results when output exceeds maxChars', () => {
       const text = Array.from({ length: 500 }, (_, i) => `match line ${i + 1}`).join('\n')
       const result = searchContent(text, { pattern: 'match', context_lines: 0 }, 200)
