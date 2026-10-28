@@ -14,8 +14,11 @@ import boto3
 import pydantic
 import pytest
 from botocore import UNSIGNED
+from botocore.awsrequest import AWSResponse
 from botocore.config import Config as BotocoreConfig
 from botocore.exceptions import ClientError, EventStreamError
+from botocore.session import get_session
+from botocore.validate import validate_parameters
 
 import strands
 from strands import _exception_notes
@@ -28,6 +31,7 @@ from strands.models.bedrock import (
     _next_stream_event,
     _suppress_task_exception,
 )
+from strands.session.file_session_manager import FileSessionManager
 from strands.tools import convert_pydantic_to_tool_spec
 from strands.types.exceptions import ContextWindowOverflowException, ModelThrottledException
 from strands.types.tools import ToolSpec
@@ -6453,3 +6457,213 @@ async def test_stream_cancel_signal_consumes_detached_task_exception(bedrock_cli
     # The detached worker now fails; its exception must be consumed, not reported to the loop.
     await asyncio.sleep(0.2)
     assert not captured, f"detached task exception was not consumed: {captured}"
+
+
+@pytest.fixture
+def search_result():
+    return {
+        "source": "https://example.com/doc",
+        "title": "Doc",
+        "content": [{"text": "Example passage."}],
+    }
+
+
+@pytest.fixture
+def search_result_citation(search_result):
+    return {
+        "location": {"searchResultLocation": {"searchResultIndex": 0, "start": 0, "end": 1}},
+        "source": search_result["source"],
+        "title": search_result["title"],
+        "sourceContent": search_result["content"],
+    }
+
+
+@pytest.mark.parametrize("citations", [None, {"enabled": True}, {"enabled": False}])
+def test_format_request_search_result_filters_nested_fields(model, search_result, citations):
+    """Search results retain only Bedrock fields at every level (#5609)."""
+    model.update_config(model_id="us.anthropic.claude-sonnet-4-5")
+    exp_search_result = copy.deepcopy(search_result)
+    if citations is not None:
+        exp_search_result["citations"] = citations
+    search_result = copy.deepcopy(exp_search_result)
+    search_result["metadata"] = {"internal": True}
+    search_result["content"][0]["internal"] = True
+    if citations is not None:
+        search_result["citations"] = {**citations, "internal": True}
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"toolResult": {"toolUseId": "t1", "status": "success", "content": [{"searchResult": search_result}]}}
+            ],
+        }
+    ]
+    original_messages = copy.deepcopy(messages)
+    tru_content = model.format_request(messages)["messages"][0]["content"]
+    exp_content = [
+        {"toolResult": {"toolUseId": "t1", "status": "success", "content": [{"searchResult": exp_search_result}]}}
+    ]
+    assert tru_content == exp_content
+    assert messages == original_messages
+    for operation in ["Converse", "ConverseStream"]:
+        shape = get_session().get_service_model("bedrock-runtime").operation_model(operation).input_shape
+        validate_parameters(model.format_request(messages), shape)
+
+
+@pytest.mark.parametrize("source", [None, "", "https://example.com/doc"])
+def test_format_request_citation_source(model, search_result_citation, source):
+    """Replay source-bearing citations without synthesizing absent or empty sources (#5609)."""
+    citation = search_result_citation
+    if source is None:
+        citation.pop("source")
+    else:
+        citation["source"] = source
+    if not source:
+        citation["location"] = {"documentPage": {"documentIndex": 0, "start": 1, "end": 2}}
+    exp_citation = copy.deepcopy(citation)
+    if not source:
+        exp_citation.pop("source", None)
+    citation["internal"] = True
+    citation["sourceContent"][0]["internal"] = True
+    content = {
+        "citationsContent": {"content": [{"text": "Answer sentence.", "internal": True}], "citations": [citation]}
+    }
+    tru_content = model.format_request([{"role": "assistant", "content": [content]}])["messages"][0]["content"]
+    exp_content = [{"citationsContent": {"content": [{"text": "Answer sentence."}], "citations": [exp_citation]}}]
+    assert tru_content == exp_content
+
+
+def test_convert_non_streaming_to_streaming_preserves_citation_source(model, search_result_citation):
+    """Blocking response reconstruction keeps citation provenance (#5609)."""
+    response = {
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "citationsContent": {
+                            "content": [{"text": "Answer sentence."}],
+                            "citations": [search_result_citation],
+                        }
+                    }
+                ],
+            }
+        },
+        "stopReason": "end_turn",
+    }
+    events = list(model.convert_non_streaming_to_streaming(response))
+    tru_citations = [
+        event["contentBlockDelta"]["delta"]["citation"]
+        for event in events
+        if "citation" in event.get("contentBlockDelta", {}).get("delta", {})
+    ]
+    assert tru_citations == [search_result_citation]
+
+
+@pytest.mark.parametrize("streaming", [True, False])
+def test_stream_search_result_session_followup(
+    model, search_result, search_result_citation, streaming, tmp_path, monkeypatch
+):
+    """Native search results and citations survive transport, session restore and follow-up (#5609)."""
+    client = get_session().create_client(
+        "bedrock-runtime", region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
+    )
+    model.client = client
+    model.update_config(model_id="us.anthropic.claude-sonnet-4-5", streaming=streaming)
+    cited_content = {
+        "citationsContent": {"content": [{"text": "Answer sentence."}], "citations": [search_result_citation]}
+    }
+    requests = []
+
+    def make_request(operation_model, request_dict):
+        requests.append(json.loads(request_dict["body"]))
+        if len(requests) == 1:
+            tool_use = {"toolUseId": "t1", "name": "retrieve", "input": {}}
+            if streaming:
+                response = {
+                    "stream": iter(
+                        [
+                            {"messageStart": {"role": "assistant"}},
+                            {
+                                "contentBlockStart": {
+                                    "contentBlockIndex": 0,
+                                    "start": {"toolUse": {"toolUseId": "t1", "name": "retrieve"}},
+                                }
+                            },
+                            {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"toolUse": {"input": "{}"}}}},
+                            {"contentBlockStop": {"contentBlockIndex": 0}},
+                            {"messageStop": {"stopReason": "tool_use"}},
+                        ]
+                    )
+                }
+            else:
+                response = {
+                    "output": {"message": {"role": "assistant", "content": [{"toolUse": tool_use}]}},
+                    "stopReason": "tool_use",
+                }
+            return AWSResponse(None, 200, {}, None), response
+        if streaming:
+            response = {
+                "stream": iter(
+                    [
+                        {"messageStart": {"role": "assistant"}},
+                        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "Answer sentence."}}},
+                        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"citation": search_result_citation}}},
+                        {"contentBlockStop": {"contentBlockIndex": 0}},
+                        {"messageStop": {"stopReason": "end_turn"}},
+                        {
+                            "metadata": {
+                                "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+                                "metrics": {"latencyMs": 1},
+                            }
+                        },
+                    ]
+                )
+            }
+        else:
+            response = {
+                "output": {"message": {"role": "assistant", "content": [cited_content]}},
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+                "metrics": {"latencyMs": 1},
+            }
+        return AWSResponse(None, 200, {}, None), response
+
+    monkeypatch.setattr(client._endpoint, "make_request", make_request)
+
+    @strands.tool
+    def retrieve():
+        """Retrieve a passage with native source attribution."""
+        return {"status": "success", "content": [{"searchResult": search_result}]}
+
+    exp_initial_messages = [
+        {"role": "user", "content": [{"text": "Retrieve the passage."}]},
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "t1", "name": "retrieve", "input": {}}}]},
+        {
+            "role": "user",
+            "content": [
+                {"toolResult": {"toolUseId": "t1", "status": "success", "content": [{"searchResult": search_result}]}}
+            ],
+        },
+    ]
+    session = FileSessionManager(session_id="citations", storage_dir=str(tmp_path))
+    agent = strands.Agent(model=model, tools=[retrieve], session_manager=session, callback_handler=None)
+    result = agent("Retrieve the passage.")
+    assert result.message["content"] == [cited_content]
+    restored = strands.Agent(
+        model=model,
+        session_manager=FileSessionManager(session_id="citations", storage_dir=str(tmp_path)),
+        tools=[retrieve],
+        callback_handler=None,
+    )
+    assert restored.messages[-1]["content"] == [cited_content]
+    restored("What else?")
+    exp_messages = [
+        *exp_initial_messages,
+        {"role": "assistant", "content": [cited_content]},
+        {"role": "user", "content": [{"text": "What else?"}]},
+    ]
+    assert len(requests) == 3
+    assert requests[0]["messages"] == exp_initial_messages[:1]
+    assert requests[1]["messages"] == exp_initial_messages
+    assert requests[2]["messages"] == exp_messages

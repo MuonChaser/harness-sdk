@@ -1265,6 +1265,18 @@ class BedrockModel(Model):
 
             return {"reasoningContent": result}
 
+        # https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_SearchResultBlock.html
+        if "searchResult" in content:
+            search_result = content["searchResult"]
+            result = {
+                "source": search_result["source"],
+                "title": search_result["title"],
+                "content": [{"text": block["text"]} for block in search_result["content"]],
+            }
+            if "citations" in search_result:
+                result["citations"] = {"enabled": search_result["citations"]["enabled"]}
+            return {"searchResult": result}
+
         # Pass through text and other simple content types
         if "text" in content:
             return {"text": content["text"]}
@@ -1348,6 +1360,8 @@ class BedrockModel(Model):
                                 filtered_source_content.append({"text": source_content["text"]})
                         if filtered_source_content:
                             filtered_citation["sourceContent"] = filtered_source_content
+                    if citation.get("source"):
+                        filtered_citation["source"] = citation["source"]
                     if "title" in citation:
                         filtered_citation["title"] = citation["title"]
                     result["citations"].append(filtered_citation)
@@ -1837,6 +1851,8 @@ class BedrockModel(Model):
                         citation_metadata["title"] = citation["title"]
                     if "location" in citation:
                         citation_metadata["location"] = citation["location"]
+                    if "source" in citation:
+                        citation_metadata["source"] = citation["source"]
                     if "sourceContent" in citation:
                         citation_metadata["sourceContent"] = citation["sourceContent"]
                     yield {"contentBlockDelta": {"delta": {"citation": citation_metadata}}}

@@ -16,6 +16,7 @@ from typing_extensions import NotRequired, TypedDict, TypeVar
 
 from .interrupt import _Interruptible
 from .media import DocumentContent, ImageContent
+from .search_result import SearchResultBlock
 
 if TYPE_CHECKING:
     from ..agent.invocation_context import InvocationContext
@@ -93,12 +94,14 @@ class ToolResultContent(TypedDict, total=False):
         document: Document content returned by the tool.
         image: Image content returned by the tool.
         json: JSON-serializable data returned by the tool.
+        searchResult: Retrieved content with source attribution for citations.
         text: Text content returned by the tool.
     """
 
     document: DocumentContent
     image: ImageContent
     json: Any
+    searchResult: SearchResultBlock
     text: str
 
 

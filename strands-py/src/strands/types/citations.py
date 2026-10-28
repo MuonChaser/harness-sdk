@@ -172,12 +172,14 @@ class Citation(TypedDict, total=False):
         location: The precise location within the source document where the
             cited content can be found, including character positions, page
             numbers, or chunk identifiers.
+        source: The source URL or identifier from the original search result.
         sourceContent: The specific content from the source document that was
             referenced or cited in the generated response.
         title: The title or identifier of the source document being cited.
     """
 
     location: CitationLocation
+    source: str
     sourceContent: list[CitationSourceContent]
     title: str
 

@@ -15,6 +15,7 @@ from typing_extensions import NotRequired, TypedDict
 from .citations import CitationsContentBlock
 from .event_loop import Metrics, Usage
 from .media import AudioContent, DocumentContent, ImageContent, VideoContent
+from .search_result import SearchResultBlock
 from .tools import ToolResult, ToolUse
 
 
@@ -87,6 +88,7 @@ class ContentBlock(TypedDict, total=False):
         guardContent: Contains the content to assess with the guardrail.
         image: Image to include in the message.
         reasoningContent: Contains content regarding the reasoning that is carried out by the model.
+        searchResult: Retrieved content with source attribution for citations.
         text: Text to include in the message.
         toolResult: The result for a tool request that a model makes.
         toolUse: Information about a tool use request from a model.
@@ -100,6 +102,7 @@ class ContentBlock(TypedDict, total=False):
     guardContent: GuardContent
     image: ImageContent
     reasoningContent: ReasoningContentBlock
+    searchResult: SearchResultBlock
     text: str
     toolResult: ToolResult
     toolUse: ToolUse

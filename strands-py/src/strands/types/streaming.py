@@ -87,12 +87,14 @@ class CitationsDelta(TypedDict, total=False):
             where cited content can be found. This can include character-level
             positions, page numbers, or document chunks depending on the
             document type and indexing method.
+        source: The source URL or identifier from the original search result.
         sourceContent: The specific content from the source document that was
             referenced or cited in the generated response.
         title: The title or identifier of the source document being cited.
     """
 
     location: CitationLocation
+    source: str
     sourceContent: list[CitationSourceContentDelta]
     title: str
 
